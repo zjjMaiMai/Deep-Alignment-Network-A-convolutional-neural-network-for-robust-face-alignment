@@ -109,14 +109,19 @@ def Stage1(InputS0=None):
 
 
 
-
 File = open("ImageData.pkl","rb")
 I = pickle.load(File)
 G = pickle.load(File)
-G = np.reshape(G,[-1,136])
-MeanShape = np.mean(G,0)
+Ti = pickle.load(File)
+Tg = pickle.load(File)
 
-MeanShape = np.where(True,MeanShape,0)
+I = np.reshape(I,(-1,112,112,1))
+Ti = np.reshape(Ti,(-1,112,112,1))
+
+G = np.reshape(G,[-1,136])
+Tg = np.reshape(Tg,[-1,136])
+
+MeanShape = np.mean(G,0)
 
 InputImage,GroudTruth,Optimizer,Ret,Cost,Fc2 = Stage1(MeanShape)
 
@@ -132,6 +137,6 @@ with tf.Session() as Sess:
         Count += 1
         if Count % 100 == 0:
             isTrain = False
-            c = Sess.run(Cost,{InputImage:I[startIdx:endIdx],GroudTruth:G[startIdx:endIdx]})
+            c = Sess.run(Cost,{InputImage:Ti,GroudTruth:Tg})
             print(c)
             isTrain = True
