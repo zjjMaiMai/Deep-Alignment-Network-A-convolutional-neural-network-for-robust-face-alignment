@@ -9,8 +9,6 @@ random translation, rotation and scaling, all sampled from normal distributions.
 During data augmentation a total of 10 images are created from each input image in the training set
 '''
 
-    
-
 def Load(fileList,isTrainData=True):
     Count = 0
     ImgList = []
@@ -53,7 +51,7 @@ def Load(fileList,isTrainData=True):
         h = down - top
         PtsR = Pts.copy()
         for i in range(len(Pts)):
-            PtsR[i] = [(Pts[i][0] - left) / w * 112,(Pts[i][1] - top) / h * 112]
+            PtsR[i] = [(Pts[i][0] - left) / w ,(Pts[i][1] - top) / h]
 
         #for i in range(68):
         #    cv2.circle(ImgR,(int(PtsR[i][0]),int(PtsR[i][1])),2,(255),-1)
@@ -105,7 +103,7 @@ def Load(fileList,isTrainData=True):
                 LandmarkNum = len(PtsR)
                 PtsR = np.reshape(PtsR,(LandmarkNum,1,2))
                 PtsR = cv2.transform(PtsR,RandomRotateM)
-                PtsR = np.reshape(PtsR,(LandmarkNum,2))
+                PtsR = np.reshape(PtsR,(LandmarkNum,2)) / 112.0
             
                 #for i in range(68):
                 #    cv2.circle(ImgR,(int(PtsR[i][0]),int(PtsR[i][1])),2,(255),-1)

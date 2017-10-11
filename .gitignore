@@ -241,3 +241,7 @@ ModelManifest.xml
 # FAKE - F# Make
 .fake/
 *.pkl
+/DAN/DAN/TestSomeFunction.py
+/DAN/DAN/Model/checkpoint
+/DAN/DAN/Model/Model.data-00000-of-00001
+/DAN/DAN/Model
