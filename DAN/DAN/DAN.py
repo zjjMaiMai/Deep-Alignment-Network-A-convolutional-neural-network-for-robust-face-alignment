@@ -255,6 +255,63 @@ class ImageServer(object):
         groundTruth = np.dot(groundTruth, A) + t
         return outImg, initShape, groundTruth
 
+def GetAffineParam(transformed_shape,mean_shape):
+    destination = tf.reshape(mean_shape,[-1,2])
+    source = tf.reshape(transformed_shape,[-1,2])
+
+    destMean = tf.reduce_mean(destination,0)
+    srcMean = tf.reduce_mean(source,0)
+
+    srcVec = tf.reshape(source - srcMean,[-1])
+    destVec = tf.reshape(destination - destMean,[-1])
+
+    Temp = tf.norm(srcVec) ** 2
+    a = tf.tensordot(srcVec,destVec,1) / Temp
+    b = 0
+
+    SrcX = tf.reshape(srcVec,[-1,2])[:,0]
+    SrcY = tf.reshape(srcVec,[-1,2])[:,1]
+    DestX = tf.reshape(destVec,[-1,2])[:,0]
+    DestY = tf.reshape(destVec,[-1,2])[:,1]
+
+    b = tf.reduce_sum(tf.multiply(SrcX,DestY) - tf.multiply(SrcY,DestX))
+    b = b / Temp
+
+    A = tf.reshape(tf.stack([a,b,-b,a]),[2,2])
+    srcMean = tf.tensordot(srcMean,A,1)
+
+    return tf.concat((tf.reshape(A,[-1]),destMean - srcMean),0)
+
+
+#Very Good
+def AffineImage(Image,Transform):
+    Image = tf.reshape(Image,[112,112])
+
+    pixels = [(x, y) for x in range(112) for y in range(112)]
+    pixels = np.array(pixels, dtype=np.float32)
+    pixelsT = tf.constant(pixels)
+
+    Transform = tf.reshape(Transform,[6])
+    A = tf.reshape(Transform[0:4],[2,2])
+    t = Transform[4:]
+
+    #A = tf.matrix_inverse(A)
+    #t = tf.tensordot(-t,A,1)
+
+    outPixels = tf.tensordot(pixelsT - t,tf.matrix_inverse(A),1)
+    outPixels = tf.clip_by_value(outPixels,0,112 - 2)
+
+    Idx = tf.cast(tf.round(outPixels),tf.int64)
+    outPixelsMaxMin = Idx + [1, 0]
+    outPixelsMinMax = Idx + [0, 1]
+    outPixelsMaxMax = Idx + [1, 1]
+
+    d = outPixels - tf.cast(Idx,tf.float32)
+    dx = d[:,0]
+    dy = d[:,1]
+
+    Ret = tf.gather_nd(tf.reshape((1 - dx) * (1 - dy),[112,112]) * Image,Idx) + tf.gather_nd(tf.reshape(dx * (1 - dy),[112,112]) * Image,Idx) + tf.gather_nd(tf.reshape((1 - dx) * dy,[112,112]) * Image,Idx) + tf.gather_nd(tf.reshape(dx * dy,[112,112]) * Image,Idx)
+    return tf.reshape(Ret,[112,112,1]),Transform
 
 def PredictErr(GroudTruth,Predict):
     Gt = tf.reshape(GroudTruth,[-1,68,2])
@@ -292,127 +349,153 @@ def transformation_from_points(points1, points2):
     return np.asarray(np.vstack([np.hstack(((s2 / s1) * R,c2.T - (s2 / s1) * R * c1.T))]))
 
 def Stage1(InputS0=None):
-    InputImage = tf.placeholder(tf.float32,[None,112,112,1])
-    GroundTruth = tf.placeholder(tf.float32,[None,136])
-    S1_isTrain = tf.placeholder(tf.bool)
+    with tf.name_scope('Stage1'):
+        InputImage = tf.placeholder(tf.float32,[None,112,112,1])
+        GroundTruth = tf.placeholder(tf.float32,[None,136])
+        S1_isTrain = tf.placeholder(tf.bool)
 
-    S0 = tf.constant(InputS0)
+        S0 = tf.constant(InputS0)
 
-    S1_Conv1a = tf.layers.batch_normalization(tf.layers.conv2d(InputImage,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
-    S1_Conv1b = tf.layers.batch_normalization(tf.layers.conv2d(S1_Conv1a,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
-    S1_Pool1 = tf.layers.max_pooling2d(S1_Conv1b,2,2,padding='same')
+        S1_Conv1a = tf.layers.batch_normalization(tf.layers.conv2d(InputImage,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Conv1b = tf.layers.batch_normalization(tf.layers.conv2d(S1_Conv1a,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Pool1 = tf.layers.max_pooling2d(S1_Conv1b,2,2,padding='same')
 
-    S1_Conv2a = tf.layers.batch_normalization(tf.layers.conv2d(S1_Pool1,128,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
-    S1_Conv2b = tf.layers.batch_normalization(tf.layers.conv2d(S1_Conv2a,128,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
-    S1_Pool2 = tf.layers.max_pooling2d(S1_Conv2b,2,2,padding='same')
+        S1_Conv2a = tf.layers.batch_normalization(tf.layers.conv2d(S1_Pool1,128,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Conv2b = tf.layers.batch_normalization(tf.layers.conv2d(S1_Conv2a,128,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Pool2 = tf.layers.max_pooling2d(S1_Conv2b,2,2,padding='same')
 
-    S1_Conv3a = tf.layers.batch_normalization(tf.layers.conv2d(S1_Pool2,256,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
-    S1_Conv3b = tf.layers.batch_normalization(tf.layers.conv2d(S1_Conv3a,256,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
-    S1_Pool3 = tf.layers.max_pooling2d(S1_Conv3b,2,2,padding='same')
+        S1_Conv3a = tf.layers.batch_normalization(tf.layers.conv2d(S1_Pool2,256,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Conv3b = tf.layers.batch_normalization(tf.layers.conv2d(S1_Conv3a,256,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Pool3 = tf.layers.max_pooling2d(S1_Conv3b,2,2,padding='same')
 
-    S1_Conv4a = tf.layers.batch_normalization(tf.layers.conv2d(S1_Pool3,512,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
-    S1_Conv4b = tf.layers.batch_normalization(tf.layers.conv2d(S1_Conv4a,512,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
-    S1_Pool4 = tf.layers.max_pooling2d(S1_Conv4b,2,2,padding='same')
+        S1_Conv4a = tf.layers.batch_normalization(tf.layers.conv2d(S1_Pool3,512,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Conv4b = tf.layers.batch_normalization(tf.layers.conv2d(S1_Conv4a,512,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Pool4 = tf.layers.max_pooling2d(S1_Conv4b,2,2,padding='same')
 
-    S1_Pool4_Flat = tf.contrib.layers.flatten(S1_Pool4)
-    S1_DropOut = tf.layers.dropout(S1_Pool4_Flat,0.5,training=S1_isTrain)
+        S1_Pool4_Flat = tf.contrib.layers.flatten(S1_Pool4)
+        S1_DropOut = tf.layers.dropout(S1_Pool4_Flat,0.5,training=S1_isTrain)
 
-    S1_Fc1 = tf.layers.batch_normalization(tf.layers.dense(S1_DropOut,256,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
-    S1_Fc2 = tf.layers.dense(S1_Fc1,136)
+        S1_Fc1 = tf.layers.batch_normalization(tf.layers.dense(S1_DropOut,256,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Fc2 = tf.layers.dense(S1_Fc1,136)
 
-    S1_Ret = S1_Fc2 + S0
+        S1_Ret = S1_Fc2 + S0
 
-    S1_Cost = tf.reduce_mean(PredictErr(GroundTruth,S1_Ret))
+        S1_Cost = tf.reduce_mean(PredictErr(GroundTruth,S1_Ret))
     
-    with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-        S1_Optimizer = tf.train.AdamOptimizer(0.001).minimize(S1_Cost)
+        with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'Stage1')):
+            S1_Optimizer = tf.train.AdamOptimizer(0.001).minimize(S1_Cost)
 
-    Feed_dict['S1_InputImage'] = InputImage
-    Feed_dict['S1_GroundTruth'] = GroundTruth
-    Feed_dict['S1_isTrain'] = S1_isTrain
+        Feed_dict['S1_InputImage'] = InputImage
+        Feed_dict['S1_GroundTruth'] = GroundTruth
+        Feed_dict['S1_isTrain'] = S1_isTrain
 
-    Ret_dict['S1_Ret'] = S1_Ret
-    Ret_dict['S1_Cost'] = S1_Cost
-    Ret_dict['S1_Feature'] = S1_Fc1
-    Ret_dict['S1_Train'] = S1_Optimizer
+        Ret_dict['S1_Ret'] = S1_Ret
+        Ret_dict['S1_Cost'] = S1_Cost
+        Ret_dict['S1_Feature'] = S1_Fc1
+        Ret_dict['S1_Train'] = S1_Optimizer
 
 def Stage2():
-    S2_InputImage = tf.placeholder(tf.float32,[None,112,112,1])
-    S2_GroundTruth = tf.placeholder(tf.float32,[None,136])
-    S2_isTrain = tf.placeholder(tf.bool)
+    with tf.name_scope('Stage2'):
+        S2_InputImage = tf.placeholder(tf.float32,[None,112,112,1])
+        S2_GroundTruth = tf.placeholder(tf.float32,[None,136])
+        S2_isTrain = tf.placeholder(tf.bool,name='3')
 
-    S2_InputFeature = tf.placeholder(tf.float32,[None,256])
-    S2_InputHeatmap = tf.placeholder(tf.float32,[None,112,112,1])
-    S2_InputInitLandmark = tf.placeholder(tf.float32,[None,136])
+        S2_InputFeature = tf.placeholder(tf.float32,[None,256])
+        S2_InputHeatmap = tf.placeholder(tf.float32,[None,112,112,1])
+        S2_InputInitLandmark = tf.placeholder(tf.float32,[None,136])
 
-    S2_Feature = tf.reshape(tf.layers.dense(S2_InputFeature,56 * 56,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),(-1,56,56,1))
-    S2_FeatureUpScale = tf.image.resize_images(S2_Feature,(112,112))
+        S2_Feature = tf.reshape(tf.layers.dense(S2_InputFeature,56 * 56,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),(-1,56,56,1))
+        S2_FeatureUpScale = tf.image.resize_images(S2_Feature,(112,112))
 
-    S2_ConcatInput = tf.layers.batch_normalization(tf.concat([S2_InputImage,S2_InputHeatmap,S2_FeatureUpScale],2),training=S2_isTrain)
-    S2_Conv1a = tf.layers.batch_normalization(tf.layers.conv2d(S2_ConcatInput,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
-    S2_Conv1b = tf.layers.batch_normalization(tf.layers.conv2d(S2_Conv1a,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
-    S2_Pool1 = tf.layers.max_pooling2d(S2_Conv1b,2,2,padding='same')
+        S2_ConcatInput = tf.layers.batch_normalization(tf.concat([S2_InputImage,S2_InputHeatmap,S2_FeatureUpScale],3),training=S2_isTrain)
+        S2_Conv1a = tf.layers.batch_normalization(tf.layers.conv2d(S2_ConcatInput,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
+        S2_Conv1b = tf.layers.batch_normalization(tf.layers.conv2d(S2_Conv1a,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
+        S2_Pool1 = tf.layers.max_pooling2d(S2_Conv1b,2,2,padding='same')
 
-    S2_Conv2a = tf.layers.batch_normalization(tf.layers.conv2d(S2_Pool1,128,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
-    S2_Conv2b = tf.layers.batch_normalization(tf.layers.conv2d(S2_Conv2a,128,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
-    S2_Pool2 = tf.layers.max_pooling2d(S2_Conv2b,2,2,padding='same')
+        S2_Conv2a = tf.layers.batch_normalization(tf.layers.conv2d(S2_Pool1,128,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
+        S2_Conv2b = tf.layers.batch_normalization(tf.layers.conv2d(S2_Conv2a,128,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
+        S2_Pool2 = tf.layers.max_pooling2d(S2_Conv2b,2,2,padding='same')
 
-    S2_Conv3a = tf.layers.batch_normalization(tf.layers.conv2d(S2_Pool2,256,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
-    S2_Conv3b = tf.layers.batch_normalization(tf.layers.conv2d(S2_Conv3a,256,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
-    S2_Pool3 = tf.layers.max_pooling2d(S2_Conv3b,2,2,padding='same')
+        S2_Conv3a = tf.layers.batch_normalization(tf.layers.conv2d(S2_Pool2,256,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
+        S2_Conv3b = tf.layers.batch_normalization(tf.layers.conv2d(S2_Conv3a,256,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
+        S2_Pool3 = tf.layers.max_pooling2d(S2_Conv3b,2,2,padding='same')
 
-    S2_Conv4a = tf.layers.batch_normalization(tf.layers.conv2d(S2_Pool3,512,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
-    S2_Conv4b = tf.layers.batch_normalization(tf.layers.conv2d(S2_Conv4a,512,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
-    S2_Pool4 = tf.layers.max_pooling2d(S2_Conv4b,2,2,padding='same')
+        S2_Conv4a = tf.layers.batch_normalization(tf.layers.conv2d(S2_Pool3,512,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
+        S2_Conv4b = tf.layers.batch_normalization(tf.layers.conv2d(S2_Conv4a,512,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
+        S2_Pool4 = tf.layers.max_pooling2d(S2_Conv4b,2,2,padding='same')
 
-    S2_Pool4_Flat = tf.contrib.layers.flatten(S2_Pool4)
-    S2_DropOut = tf.layers.dropout(S2_Pool4_Flat,0.5,training=S2_isTrain)
+        S2_Pool4_Flat = tf.contrib.layers.flatten(S2_Pool4)
+        S2_DropOut = tf.layers.dropout(S2_Pool4_Flat,0.5,training=S2_isTrain)
 
-    S2_Fc1 = tf.layers.batch_normalization(tf.layers.dense(S2_DropOut,256,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
-    S2_Fc2 = tf.layers.dense(S2_Fc1,136)
+        S2_Fc1 = tf.layers.batch_normalization(tf.layers.dense(S2_DropOut,256,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
+        S2_Fc2 = tf.layers.dense(S2_Fc1,136)
 
-    S2_Ret = S2_Fc2 + S2_InputInitLandmark
+        S2_Ret = S2_Fc2 + S2_InputInitLandmark
 
-    S2_Cost = tf.reduce_mean(PredictErr(S2_GroundTruth,S2_Ret))
+        S2_Cost = tf.reduce_mean(PredictErr(S2_GroundTruth,S2_Ret))
 
-    with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-        S2_Optimizer = tf.train.AdamOptimizer(0.001).minimize(S2_Cost)
+        with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'Stage2')):
+            S2_Optimizer = tf.train.AdamOptimizer(0.001).minimize(S2_Cost)
 
-    Feed_dict['S2_InputImage'] = S2_InputImage
-    Feed_dict['S2_GroundTruth'] = S2_GroundTruth
-    Feed_dict['S2_isTrain'] = S2_isTrain
+        Feed_dict['S2_InputImage'] = S2_InputImage
+        Feed_dict['S2_InputInitLandmark'] = S2_InputInitLandmark
+        Feed_dict['S2_InputFeature'] = S2_InputFeature
+        Feed_dict['S2_GroundTruth'] = S2_GroundTruth
+        Feed_dict['S2_InputHeatmap'] = S2_InputHeatmap
+        Feed_dict['S2_isTrain'] = S2_isTrain
 
-    Ret_dict['S2_Ret'] = S2_Ret
-    Ret_dict['S2_Cost'] = S2_Cost
-    Ret_dict['S2_Feature'] = S2_Fc1
-    Ret_dict['S2_Train'] = S2_Optimizer
+        Ret_dict['S2_Ret'] = S2_Ret
+        Ret_dict['S2_Cost'] = S2_Cost
+        Ret_dict['S2_Feature'] = S2_Fc1
+        Ret_dict['S2_Train'] = S2_Optimizer
 
 
-def ConnectionLayer(Image,InputLandmark,MeanShape):
-    M = transformation_from_points(InputLandmark,MeanShape)
+def ConnectionLayer(Images,InputLandmarks,GroundTruths,MeanShape):
+    OutImages = []
+    OutShapes = []
+    OutGts = []
+    OutMs = []
+    OutHeatMaps = []
 
-    Is = np.reshape(InputLandmark,(68,1,2))
-    Ms = np.reshape(MeanShape,(68,1,2))
+    for Image,InputLandmark,Gt in zip(Images,InputLandmarks,GroundTruths):
 
-    OutImage = cv2.warpAffine(Image,M,(112,112))
-    OutShape = cv2.transform(Is,M)
-    OutShape = np.reshape(OutShape,-1)
+        M = transformation_from_points(InputLandmark,MeanShape)
+
+        Is = np.reshape(InputLandmark,(68,1,2))
+        Ms = np.reshape(MeanShape,(68,1,2))
+        Gs = np.reshape(Gt,(68,1,2))
+
+        OutImage = cv2.warpAffine(Image,M,(112,112))
+        OutShape = cv2.transform(Is,M)
+        OutGs = cv2.transform(Gs,M)
+        OutGs = np.reshape(OutGs,-1)
+        OutShape = np.reshape(OutShape,-1)
        
-    HeatMap = np.full((112 + 16,112 + 16),100000,dtype=np.float32)
-    for i in range(68):
-        LandX = OutShape[i * 2]
-        LandY = OutShape[i * 2 + 1]
+        HeatMap = np.full((112 + 16,112 + 16),100000,dtype=np.float32)
+        for i in range(68):
+            LandX = OutShape[i * 2]
+            LandY = OutShape[i * 2 + 1]
 
-        for y in range(-8,8):
-            for x in range(-8,8):
-                dis = (x ** 2 + y ** 2) ** 0.5
-                Y = int(round(LandY + y))
-                X = int(round(LandX + x))
-                if HeatMap[Y][X] >= dis: 
-                    HeatMap[Y][X] = dis
+            for y in range(-8,8):
+                for x in range(-8,8):
+                    dis = (x ** 2 + y ** 2) ** 0.5
+                    Y = int(round(LandY + y))
+                    X = int(round(LandX + x))
+                    if HeatMap[Y][X] >= dis: 
+                        HeatMap[Y][X] = dis
 
-    HeatMap = 1 / (1 + HeatMap[0:112,0:112])
-    return OutImage,OutShape,M,HeatMap
+        HeatMap = 1 / (1 + HeatMap[0:112,0:112])
+        HeatMap = np.reshape(HeatMap,[112,112,1])
+        
+        OutImage = np.reshape(OutImage,[112,112,1])
+
+        OutImages.append(OutImage)
+        OutShapes.append(OutShape)
+        OutMs.append(M)
+        OutHeatMaps.append(HeatMap)
+        OutGts.append(OutGs)
+
+    return OutImages,OutShapes,OutGts,OutMs,OutHeatMaps
     
 
 trainSet = ImageServer.Load("C:\\Users\\ZhaoHang\\Desktop\\DeepAlignmentNetwork-master\\data\\dataset_nimgs=60960_perturbations=[0.2, 0.2, 20, 0.25]_size=[112, 112].npz")
@@ -465,26 +548,105 @@ G = np.reshape(G,[-1,136]).astype(np.float32)
 Tg = np.reshape(Tg,[-1,136]).astype(np.float32)
 MeanShape = np.reshape(initLandmarks,[-1,136]).astype(np.float32)
 
+InputImage = tf.placeholder(tf.float32,[None,112,112,1])
+GroundTruth = tf.placeholder(tf.float32,[None,136])
+
+AffineParam = tf.map_fn(lambda c: GetAffineParam(c ,MeanShape),GroundTruth)
+RetImage,_ = tf.map_fn(lambda x: AffineImage(x[0],x[1]),(InputImage,AffineParam),dtype=(tf.float32,tf.float32))
+
+with tf.Session() as Sess:
+    #print(Sess.run(tf.shape()))
+    Im = Sess.run(RetImage,{InputImage:I[0:64],GroundTruth:G[0:64]})
+    for images,imaget in zip(I,Im):
+        cv2.imshow('s',images)
+        cv2.imshow('t',imaget)
+
+        cv2.waitKey(-1)
+
 Stage1(MeanShape)
 Stage2()
 
-with tf.Session() as Sess:
-    Sess.run(tf.global_variables_initializer())
-    for w in range(100):
-        Count = 0
-        RandomIdx = np.random.choice(I.shape[0],64,False)
-        while Count < I.shape[0] // 64:
-            _,S1Ret = Sess.run([Ret_dict['S1_Train'],Ret_dict['S1_Ret']],{Feed_dict['S1_InputImage']:I[RandomIdx],
-                                                                          Feed_dict['S1_GroundTruth']:G[RandomIdx],
-                                                                          Feed_dict['S1_isTrain']:True})
 
+STAGE = 2
+
+
+with tf.Session() as Sess:
+    if STAGE == 1:
+        Sess.run(tf.global_variables_initializer())
+    else:
+        saver = tf.train.Saver()
+        saver.restore(Sess,'./Model/Model')
+
+    print("Fuck!")
+    for w in range(20):
+        Count = 0
+        while Count * 64 < I.shape[0]  :
+            RandomIdx = np.random.choice(I.shape[0],64,False)
+
+            if STAGE == 1:
+                '''
+                Stage1
+                '''
+                Sess.run(Ret_dict['S1_Train'],{Feed_dict['S1_InputImage']:I[RandomIdx],
+                                               Feed_dict['S1_GroundTruth']:G[RandomIdx],
+                                               Feed_dict['S1_isTrain']:True})
+            else:
+                '''
+                Stage2
+                '''
+                S1Ret,S1_Feature = Sess.run([Ret_dict['S1_Ret'],Ret_dict['S1_Feature']],{Feed_dict['S1_InputImage']:I[RandomIdx],
+                                                                              Feed_dict['S1_GroundTruth']:G[RandomIdx],
+                                                                              Feed_dict['S1_isTrain']:False})
+            
+                OutImages,OutShapes,OutGts,OutMs,OutHeatMaps = ConnectionLayer(I[RandomIdx],S1Ret,G[RandomIdx],MeanShape)
+                _,S2Ret = Sess.run([Ret_dict['S2_Train'],Ret_dict['S2_Ret']],{Feed_dict['S2_InputImage']:OutImages,
+                                                                              Feed_dict['S2_GroundTruth']:OutGts,
+                                                                              Feed_dict['S2_isTrain']:True,
+                                                                              Feed_dict['S2_InputInitLandmark']:OutShapes,
+                                                                              Feed_dict['S2_InputFeature']:S1_Feature,
+                                                                              Feed_dict['S2_InputHeatmap']:OutHeatMaps})
             if Count % 100 == 0:
-                TestErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['S1_InputImage']:Ti,
-                                                        Feed_dict['S1_GroundTruth']:Tg,
-                                                        Feed_dict['S1_isTrain']:False})
-                BatchErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['S1_InputImage']:I[RandomIdx],
-                                                         Feed_dict['S1_GroundTruth']:G[RandomIdx],
-                                                         Feed_dict['S1_isTrain']:False})
+                TestErr = 0
+                BatchErr = 0
+
+                if STAGE == 1:
+                    '''
+                    Stage1
+                    '''
+                    TestErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['S1_InputImage']:Ti,
+                                                            Feed_dict['S1_GroundTruth']:Tg,
+                                                            Feed_dict['S1_isTrain']:False})
+                    BatchErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['S1_InputImage']:I[RandomIdx],
+                                                             Feed_dict['S1_GroundTruth']:G[RandomIdx],
+                                                             Feed_dict['S1_isTrain']:False})
+                else:
+                    '''
+                    Stage2
+                    '''
+                    S1Ret,S1_Feature = Sess.run([Ret_dict['S1_Ret'],Ret_dict['S1_Feature']],{Feed_dict['S1_InputImage']:I[RandomIdx],
+                                                                              Feed_dict['S1_GroundTruth']:G[RandomIdx],
+                                                                              Feed_dict['S1_isTrain']:False})
+            
+                    OutImages,OutShapes,OutGts,OutMs,OutHeatMaps = ConnectionLayer(I[RandomIdx],S1Ret,G[RandomIdx],MeanShape)
+                    BatchErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['S2_InputImage']:OutImages,
+                                                             Feed_dict['S2_GroundTruth']:OutGts,
+                                                             Feed_dict['S2_InputInitLandmark']:OutShapes,
+                                                             Feed_dict['S2_isTrain']:False,
+                                                             Feed_dict['S2_InputFeature']:S1_Feature,
+                                                             Feed_dict['S2_InputHeatmap']:OutHeatMaps})
+
+                    S1Ret,S1_Feature = Sess.run([Ret_dict['S1_Ret'],Ret_dict['S1_Feature']],{Feed_dict['S1_InputImage']:Ti,
+                                                                              Feed_dict['S1_GroundTruth']:Tg,
+                                                                              Feed_dict['S1_isTrain']:False})
+            
+                    OutImages,OutShapes,OutGts,OutMs,OutHeatMaps = ConnectionLayer(Ti,S1Ret,Tg,MeanShape)
+                    TestErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['S2_InputImage']:OutImages,
+                                                            Feed_dict['S2_GroundTruth']:OutGts,
+                                                            Feed_dict['S2_InputInitLandmark']:OutShapes,
+                                                            Feed_dict['S2_isTrain']:False,
+                                                            Feed_dict['S2_InputFeature']:S1_Feature,
+                                                            Feed_dict['S2_InputHeatmap']:OutHeatMaps})
+
                 print(w,Count,'TestErr:',TestErr,' BatchErr:',BatchErr)
             Count += 1
     saver = tf.train.Saver()
