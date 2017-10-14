@@ -353,7 +353,7 @@ def AffineLandmark(Landmark, Transform,isInv=False):
         return output,a,t
 
     return tf.map_fn(lambda a:Do(a[0],a[1],a[2]) ,(Landmark,A,T),(tf.float32,tf.float32,tf.float32))[0]
-#untest
+#test Good
 def GetHeatMap(Landmark):
 
     HalfSize = 8
