@@ -1,15 +1,7 @@
 import tensorflow as tf
 import numpy as np  
-import matplotlib.pyplot as plt  
-import cv2
-import pickle
-import matplotlib.pyplot as plt
-
-from scipy import ndimage
-import numpy as np
-import glob
-from os import path
-import math
+import itertools
+from tensorflow.python.client import timeline 
 
 class ImageServer(object):
     def __init__(self, imgSize=[112, 112], frameFraction=0.25, initialization='box', color=False):
@@ -254,65 +246,138 @@ class ImageServer(object):
 
         groundTruth = np.dot(groundTruth, A) + t
         return outImg, initShape, groundTruth
+def GetPaperDataset():
+    trainSet = ImageServer.Load("C:\\Users\\ZhaoHang\\Desktop\\DeepAlignmentNetwork-master\\data\\dataset_nimgs=60960_perturbations=[0.2, 0.2, 20, 0.25]_size=[112, 112].npz")
+    validationSet = ImageServer.Load("C:\\Users\\ZhaoHang\\Desktop\\DeepAlignmentNetwork-master\\data\\dataset_nimgs=100_perturbations=[]_size=[112, 112].npz")
 
-def GetAffineParam(transformed_shape,mean_shape):
-    destination = tf.reshape(mean_shape,[-1,2])
-    source = tf.reshape(transformed_shape,[-1,2])
+    def getLabelsForDataset(imageServer):
+        nSamples = imageServer.gtLandmarks.shape[0]
+        nLandmarks = imageServer.gtLandmarks.shape[1]
 
-    destMean = tf.reduce_mean(destination,0)
-    srcMean = tf.reduce_mean(source,0)
+        y = np.zeros((nSamples, nLandmarks, 2), dtype=np.float32)
+        #y[:, 0] = imageServer.initLandmarks
+        y = imageServer.gtLandmarks
 
-    srcVec = tf.reshape(source - srcMean,[-1])
-    destVec = tf.reshape(destination - destMean,[-1])
+        return y
 
-    Temp = tf.norm(srcVec) ** 2
-    a = tf.tensordot(srcVec,destVec,1) / Temp
-    b = 0
+    nSamples = trainSet.gtLandmarks.shape[0]
+    imageHeight = trainSet.imgSize[0]
+    imageWidth = trainSet.imgSize[1]
+    nChannels = trainSet.imgs.shape[1]
 
-    SrcX = tf.reshape(srcVec,[-1,2])[:,0]
-    SrcY = tf.reshape(srcVec,[-1,2])[:,1]
-    DestX = tf.reshape(destVec,[-1,2])[:,0]
-    DestY = tf.reshape(destVec,[-1,2])[:,1]
+    Xtrain = trainSet.imgs
+    Xvalid = validationSet.imgs
 
-    b = tf.reduce_sum(tf.multiply(SrcX,DestY) - tf.multiply(SrcY,DestX))
-    b = b / Temp
+    Ytrain = getLabelsForDataset(trainSet)
+    Yvalid = getLabelsForDataset(validationSet)
 
-    A = tf.reshape(tf.stack([a,b,-b,a]),[2,2])
-    srcMean = tf.tensordot(srcMean,A,1)
+    testIdxsTrainSet = range(len(Xvalid))
+    testIdxsValidSet = range(len(Xvalid))
 
-    return tf.concat((tf.reshape(A,[-1]),destMean - srcMean),0)
+    meanImg = trainSet.meanImg
+    stdDevImg = trainSet.stdDevImg
+    initLandmarks = trainSet.initLandmarks[0]
 
+    return np.reshape(Xtrain,(-1,112,112,1)),np.reshape(Ytrain,[-1,136]).astype(np.float32),np.reshape(Xvalid,(-1,112,112,1)),np.reshape(Yvalid,[-1,136]).astype(np.float32),np.reshape(initLandmarks,[-1,136]).astype(np.float32)
+#test Good
+def GetAffineParam(ShapesFrom,ShapeTo):
+    def Do(From,To):
+        destination = tf.reshape(To,[-1,2])
+        source = tf.reshape(From,[-1,2])
 
-#Very Good
-def AffineImage(Image,Transform):
-    Image = tf.reshape(Image,[112,112])
+        destMean = tf.reduce_mean(destination,0)
+        srcMean = tf.reduce_mean(source,0)
 
-    pixels = [(x, y) for x in range(112) for y in range(112)]
-    pixels = np.array(pixels, dtype=np.float32)
-    pixelsT = tf.constant(pixels)
+        srcCenter = source - srcMean
+        destCenter = destination - destMean
 
-    Transform = tf.reshape(Transform,[6])
-    A = tf.reshape(Transform[0:4],[2,2])
-    t = Transform[4:]
+        srcVec = tf.reshape(srcCenter,[-1])
+        destVec = tf.reshape(destCenter,[-1])
 
-    #A = tf.matrix_inverse(A)
-    #t = tf.tensordot(-t,A,1)
+        Temp = tf.norm(srcVec) ** 2
+        a = tf.tensordot(srcVec,destVec,1) / Temp
+        b = 0
 
-    outPixels = tf.tensordot(pixelsT - t,tf.matrix_inverse(A),1)
-    outPixels = tf.clip_by_value(outPixels,0,112 - 2)
+        SrcX = tf.reshape(srcVec,[-1,2])[:,0]
+        SrcY = tf.reshape(srcVec,[-1,2])[:,1]
+        DestX = tf.reshape(destVec,[-1,2])[:,0]
+        DestY = tf.reshape(destVec,[-1,2])[:,1]
 
-    Idx = tf.cast(tf.round(outPixels),tf.int64)
-    outPixelsMaxMin = Idx + [1, 0]
-    outPixelsMinMax = Idx + [0, 1]
-    outPixelsMaxMax = Idx + [1, 1]
+        b = tf.reduce_sum(tf.multiply(SrcX,DestY) - tf.multiply(SrcY,DestX))
+        b = b / Temp
 
-    d = outPixels - tf.cast(Idx,tf.float32)
-    dx = d[:,0]
-    dy = d[:,1]
+        A = tf.reshape(tf.stack([a,b,-b,a]),[2,2])
+        srcMean = tf.tensordot(srcMean,A,1)
 
-    Ret = tf.gather_nd(tf.reshape((1 - dx) * (1 - dy),[112,112]) * Image,Idx) + tf.gather_nd(tf.reshape(dx * (1 - dy),[112,112]) * Image,Idx) + tf.gather_nd(tf.reshape((1 - dx) * dy,[112,112]) * Image,Idx) + tf.gather_nd(tf.reshape(dx * dy,[112,112]) * Image,Idx)
-    return tf.reshape(Ret,[112,112,1]),Transform
+        return tf.concat((tf.reshape(A,[-1]),destMean - srcMean),0)
+    return tf.map_fn(lambda c: Do(c ,ShapeTo),ShapesFrom)
+#test Good
+def AffineImage(Image,Transform,isInv=False):
+    A = tf.reshape(Transform[:,0:4],[-1,2,2])
+    T = tf.slice(Transform,[0,4],[-1,-1])
 
+    if isInv == False:
+        A = tf.map_fn(lambda x:tf.matrix_inverse(x),A)
+        T,_ = tf.map_fn(lambda x:(tf.tensordot(-x[0],x[1],1),x[1]),(T,A))
+
+    def Do(I,a,t):
+        pixels = [(x, y) for x in range(112) for y in range(112)]
+        pixels = np.array(pixels, dtype=np.float32)
+        
+        I = tf.reshape(I,[112,112])
+        OutImage = tf.zeros([112,112])
+        Pixels = tf.constant(pixels,shape=[112 * 112,2])
+
+        t = tf.gather(t,[1,0])
+        a = tf.transpose(a)
+
+        SrcPixels = tf.tensordot(Pixels,a,1) + t
+        SrcPixels = tf.clip_by_value(SrcPixels,0,112 - 1)
+
+        SrcPixelsIdx = tf.reshape(tf.cast(tf.round(SrcPixels),tf.int64),[112 * 112,2])
+        OutImage = tf.gather_nd(I,SrcPixelsIdx)
+        return tf.reshape(OutImage,[112,112,1]),a,t
+
+    return tf.map_fn(lambda a:Do(a[0],a[1],a[2]),(Image,A,T))[0]
+#test Good
+def AffineLandmark(Landmark, Transform,isInv=False):
+    A = tf.reshape(Transform[:,0:4],[-1,2,2])
+    T = tf.slice(Transform,[0,4],[-1,-1])
+
+    if isInv:
+        A = tf.map_fn(lambda x:tf.matrix_inverse(x),A)
+        T,_ = tf.map_fn(lambda x:(tf.tensordot(-x[0],x[1],1),x[1]),(T,A))
+
+    def Do(L,a,t):
+        output = tf.reshape(tf.tensordot(tf.reshape(L,[-1, 2]), a,1) + t,[-1])
+        return output,a,t
+
+    return tf.map_fn(lambda a:Do(a[0],a[1],a[2]) ,(Landmark,A,T),(tf.float32,tf.float32,tf.float32))[0]
+#untest
+def GetHeatMap(Landmark):
+
+    HalfSize = 8
+    offsets = tf.constant(np.array(list(itertools.product(range(-HalfSize,HalfSize + 1), range(-HalfSize,HalfSize + 1)))),tf.float32)
+
+    def Do(L):
+        def DoIn(Point):
+            Img = tf.zeros([112,112])
+            intLandmark = tf.to_float(tf.to_int32(Point))
+            locations = offsets + intLandmark
+
+            dxdy = Point - intLandmark
+            offsetsSubPix = offsets - dxdy
+
+            vals = 1 / (1 + tf.sqrt(tf.reduce_sum(offsetsSubPix * offsetsSubPix,1)))       
+            return tf.sparse_to_dense(tf.to_int32(locations),[112,112],vals)
+
+        Landmarks = tf.reshape(L,[-1,2])
+        Landmarks = tf.clip_by_value(Landmarks,HalfSize,112 - 1 - HalfSize)
+        Ret = tf.map_fn(lambda c : DoIn(c),Landmarks)
+        Ret = tf.reshape(tf.reduce_max(Ret,0),[112,112,1])
+        return Ret
+    return tf.map_fn(lambda c:Do(c),Landmark)
+#test Good
 def PredictErr(GroudTruth,Predict):
     Gt = tf.reshape(GroudTruth,[-1,68,2])
     Ot = tf.reshape(Predict,[-1,68,2])
@@ -328,33 +393,17 @@ def PredictErr(GroudTruth,Predict):
 Feed_dict = {}
 Ret_dict = {}
 
-#Procrustes analysis
-def transformation_from_points(points1, points2):
-    points1 = np.asmatrix(points1.copy().reshape((-1,2)))
-    points2 = np.asmatrix(points2.copy().reshape((-1,2)))
+def Layers(Mshape=None):
+    MeanShape = tf.constant(Mshape)
 
-    c1 = np.mean(points1, axis=0)
-    c2 = np.mean(points2, axis=0)
-    points1 -= c1
-    points2 -= c2
-
-    s1 = np.std(points1)
-    s2 = np.std(points2)
-    points1 /= s1
-    points2 /= s2
-
-    U, S, Vt = np.linalg.svd(points1.T * points2)
-    R = (U * Vt).T
-
-    return np.asarray(np.vstack([np.hstack(((s2 / s1) * R,c2.T - (s2 / s1) * R * c1.T))]))
-
-def Stage1(InputS0=None):
     with tf.name_scope('Stage1'):
         InputImage = tf.placeholder(tf.float32,[None,112,112,1])
         GroundTruth = tf.placeholder(tf.float32,[None,136])
         S1_isTrain = tf.placeholder(tf.bool)
 
-        S0 = tf.constant(InputS0)
+        Feed_dict['InputImage'] = InputImage
+        Feed_dict['GroundTruth'] = GroundTruth
+        Feed_dict['S1_isTrain'] = S1_isTrain
 
         S1_Conv1a = tf.layers.batch_normalization(tf.layers.conv2d(InputImage,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
         S1_Conv1b = tf.layers.batch_normalization(tf.layers.conv2d(S1_Conv1a,64,3,1,padding='same',activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
@@ -375,36 +424,30 @@ def Stage1(InputS0=None):
         S1_Pool4_Flat = tf.contrib.layers.flatten(S1_Pool4)
         S1_DropOut = tf.layers.dropout(S1_Pool4_Flat,0.5,training=S1_isTrain)
 
-        S1_Fc1 = tf.layers.batch_normalization(tf.layers.dense(S1_DropOut,256,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain)
+        S1_Fc1 = tf.layers.batch_normalization(tf.layers.dense(S1_DropOut,256,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S1_isTrain,name = 'S1_Fc1')
         S1_Fc2 = tf.layers.dense(S1_Fc1,136)
 
-        S1_Ret = S1_Fc2 + S0
-
+        S1_Ret = S1_Fc2 + MeanShape
         S1_Cost = tf.reduce_mean(PredictErr(GroundTruth,S1_Ret))
-    
+
         with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'Stage1')):
             S1_Optimizer = tf.train.AdamOptimizer(0.001).minimize(S1_Cost)
-
-        Feed_dict['S1_InputImage'] = InputImage
-        Feed_dict['S1_GroundTruth'] = GroundTruth
-        Feed_dict['S1_isTrain'] = S1_isTrain
-
+        
         Ret_dict['S1_Ret'] = S1_Ret
         Ret_dict['S1_Cost'] = S1_Cost
-        Ret_dict['S1_Feature'] = S1_Fc1
-        Ret_dict['S1_Train'] = S1_Optimizer
+        Ret_dict['S1_Optimizer'] = S1_Optimizer
 
-def Stage2():
     with tf.name_scope('Stage2'):
-        S2_InputImage = tf.placeholder(tf.float32,[None,112,112,1])
-        S2_GroundTruth = tf.placeholder(tf.float32,[None,136])
-        S2_isTrain = tf.placeholder(tf.bool,name='3')
+        S2_isTrain = tf.placeholder(tf.bool)
+        Feed_dict['S2_isTrain'] = S2_isTrain
 
-        S2_InputFeature = tf.placeholder(tf.float32,[None,256])
-        S2_InputHeatmap = tf.placeholder(tf.float32,[None,112,112,1])
-        S2_InputInitLandmark = tf.placeholder(tf.float32,[None,136])
+        print(S1_Ret,MeanShape)
+        S2_AffineParam = GetAffineParam(S1_Ret,MeanShape)
+        S2_InputImage = AffineImage(InputImage,S2_AffineParam)
+        S2_InputLandmark = AffineLandmark(S1_Ret,S2_AffineParam)
+        S2_InputHeatmap = GetHeatMap(S2_InputLandmark)
 
-        S2_Feature = tf.reshape(tf.layers.dense(S2_InputFeature,56 * 56,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),(-1,56,56,1))
+        S2_Feature = tf.reshape(tf.layers.dense(S1_Fc1,56 * 56,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),(-1,56,56,1))
         S2_FeatureUpScale = tf.image.resize_images(S2_Feature,(112,112))
 
         S2_ConcatInput = tf.layers.batch_normalization(tf.concat([S2_InputImage,S2_InputHeatmap,S2_FeatureUpScale],3),training=S2_isTrain)
@@ -430,145 +473,22 @@ def Stage2():
         S2_Fc1 = tf.layers.batch_normalization(tf.layers.dense(S2_DropOut,256,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer()),training=S2_isTrain)
         S2_Fc2 = tf.layers.dense(S2_Fc1,136)
 
-        S2_Ret = S2_Fc2 + S2_InputInitLandmark
-
-        S2_Cost = tf.reduce_mean(PredictErr(S2_GroundTruth,S2_Ret))
+        S2_Ret = S2_Fc2 + S2_InputLandmark
+        S2_Cost = tf.reduce_mean(PredictErr(AffineLandmark(GroundTruth,S2_AffineParam),S2_Ret))
 
         with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'Stage2')):
             S2_Optimizer = tf.train.AdamOptimizer(0.001).minimize(S2_Cost)
 
-        Feed_dict['S2_InputImage'] = S2_InputImage
-        Feed_dict['S2_InputInitLandmark'] = S2_InputInitLandmark
-        Feed_dict['S2_InputFeature'] = S2_InputFeature
-        Feed_dict['S2_GroundTruth'] = S2_GroundTruth
-        Feed_dict['S2_InputHeatmap'] = S2_InputHeatmap
-        Feed_dict['S2_isTrain'] = S2_isTrain
-
         Ret_dict['S2_Ret'] = S2_Ret
         Ret_dict['S2_Cost'] = S2_Cost
-        Ret_dict['S2_Feature'] = S2_Fc1
-        Ret_dict['S2_Train'] = S2_Optimizer
+        Ret_dict['S2_Optimizer'] = S2_Optimizer
+    return
 
 
-def ConnectionLayer(Images,InputLandmarks,GroundTruths,MeanShape):
-    OutImages = []
-    OutShapes = []
-    OutGts = []
-    OutMs = []
-    OutHeatMaps = []
 
-    for Image,InputLandmark,Gt in zip(Images,InputLandmarks,GroundTruths):
-
-        M = transformation_from_points(InputLandmark,MeanShape)
-
-        Is = np.reshape(InputLandmark,(68,1,2))
-        Ms = np.reshape(MeanShape,(68,1,2))
-        Gs = np.reshape(Gt,(68,1,2))
-
-        OutImage = cv2.warpAffine(Image,M,(112,112))
-        OutShape = cv2.transform(Is,M)
-        OutGs = cv2.transform(Gs,M)
-        OutGs = np.reshape(OutGs,-1)
-        OutShape = np.reshape(OutShape,-1)
-       
-        HeatMap = np.full((112 + 16,112 + 16),100000,dtype=np.float32)
-        for i in range(68):
-            LandX = OutShape[i * 2]
-            LandY = OutShape[i * 2 + 1]
-
-            for y in range(-8,8):
-                for x in range(-8,8):
-                    dis = (x ** 2 + y ** 2) ** 0.5
-                    Y = int(round(LandY + y))
-                    X = int(round(LandX + x))
-                    if HeatMap[Y][X] >= dis: 
-                        HeatMap[Y][X] = dis
-
-        HeatMap = 1 / (1 + HeatMap[0:112,0:112])
-        HeatMap = np.reshape(HeatMap,[112,112,1])
-        
-        OutImage = np.reshape(OutImage,[112,112,1])
-
-        OutImages.append(OutImage)
-        OutShapes.append(OutShape)
-        OutMs.append(M)
-        OutHeatMaps.append(HeatMap)
-        OutGts.append(OutGs)
-
-    return OutImages,OutShapes,OutGts,OutMs,OutHeatMaps
-    
-
-trainSet = ImageServer.Load("C:\\Users\\ZhaoHang\\Desktop\\DeepAlignmentNetwork-master\\data\\dataset_nimgs=60960_perturbations=[0.2, 0.2, 20, 0.25]_size=[112, 112].npz")
-validationSet = ImageServer.Load("C:\\Users\\ZhaoHang\\Desktop\\DeepAlignmentNetwork-master\\data\\dataset_nimgs=100_perturbations=[]_size=[112, 112].npz")
-
-
-def getLabelsForDataset(imageServer):
-    nSamples = imageServer.gtLandmarks.shape[0]
-    nLandmarks = imageServer.gtLandmarks.shape[1]
-
-    y = np.zeros((nSamples, nLandmarks, 2), dtype=np.float32)
-    #y[:, 0] = imageServer.initLandmarks
-    y = imageServer.gtLandmarks
-
-    return y
-
-nSamples = trainSet.gtLandmarks.shape[0]
-imageHeight = trainSet.imgSize[0]
-imageWidth = trainSet.imgSize[1]
-nChannels = trainSet.imgs.shape[1]
-
-Xtrain = trainSet.imgs
-Xvalid = validationSet.imgs
-
-Ytrain = getLabelsForDataset(trainSet)
-Yvalid = getLabelsForDataset(validationSet)
-
-testIdxsTrainSet = range(len(Xvalid))
-testIdxsValidSet = range(len(Xvalid))
-
-meanImg = trainSet.meanImg
-stdDevImg = trainSet.stdDevImg
-initLandmarks = trainSet.initLandmarks[0]
-
-#File = open("ImageData.pkl","rb")
-#I = pickle.load(File)
-#G = pickle.load(File)
-#Ti = pickle.load(File)
-#Tg = pickle.load(File)
-I = Xtrain
-G = Ytrain
-Ti = Xvalid
-Tg = Yvalid
- 
-
-I = np.reshape(I,(-1,112,112,1))
-Ti = np.reshape(Ti,(-1,112,112,1))
-
-G = np.reshape(G,[-1,136]).astype(np.float32)
-Tg = np.reshape(Tg,[-1,136]).astype(np.float32)
-MeanShape = np.reshape(initLandmarks,[-1,136]).astype(np.float32)
-
-InputImage = tf.placeholder(tf.float32,[None,112,112,1])
-GroundTruth = tf.placeholder(tf.float32,[None,136])
-
-AffineParam = tf.map_fn(lambda c: GetAffineParam(c ,MeanShape),GroundTruth)
-RetImage,_ = tf.map_fn(lambda x: AffineImage(x[0],x[1]),(InputImage,AffineParam),dtype=(tf.float32,tf.float32))
-
-with tf.Session() as Sess:
-    #print(Sess.run(tf.shape()))
-    Im = Sess.run(RetImage,{InputImage:I[0:64],GroundTruth:G[0:64]})
-    for images,imaget in zip(I,Im):
-        cv2.imshow('s',images)
-        cv2.imshow('t',imaget)
-
-        cv2.waitKey(-1)
-
-Stage1(MeanShape)
-Stage2()
-
-
-STAGE = 2
-
+I,G,Ti,Tg,MeanShape = GetPaperDataset()
+Layers(MeanShape)
+STAGE = 1
 
 with tf.Session() as Sess:
     if STAGE == 1:
@@ -577,76 +497,25 @@ with tf.Session() as Sess:
         saver = tf.train.Saver()
         saver.restore(Sess,'./Model/Model')
 
-    print("Fuck!")
-    for w in range(20):
+    for w in range(2):
         Count = 0
         while Count * 64 < I.shape[0]  :
             RandomIdx = np.random.choice(I.shape[0],64,False)
-
             if STAGE == 1:
-                '''
-                Stage1
-                '''
-                Sess.run(Ret_dict['S1_Train'],{Feed_dict['S1_InputImage']:I[RandomIdx],
-                                               Feed_dict['S1_GroundTruth']:G[RandomIdx],
-                                               Feed_dict['S1_isTrain']:True})
+                Sess.run(Ret_dict['S1_Optimizer'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:True,Feed_dict['S2_isTrain']:False})
             else:
-                '''
-                Stage2
-                '''
-                S1Ret,S1_Feature = Sess.run([Ret_dict['S1_Ret'],Ret_dict['S1_Feature']],{Feed_dict['S1_InputImage']:I[RandomIdx],
-                                                                              Feed_dict['S1_GroundTruth']:G[RandomIdx],
-                                                                              Feed_dict['S1_isTrain']:False})
-            
-                OutImages,OutShapes,OutGts,OutMs,OutHeatMaps = ConnectionLayer(I[RandomIdx],S1Ret,G[RandomIdx],MeanShape)
-                _,S2Ret = Sess.run([Ret_dict['S2_Train'],Ret_dict['S2_Ret']],{Feed_dict['S2_InputImage']:OutImages,
-                                                                              Feed_dict['S2_GroundTruth']:OutGts,
-                                                                              Feed_dict['S2_isTrain']:True,
-                                                                              Feed_dict['S2_InputInitLandmark']:OutShapes,
-                                                                              Feed_dict['S2_InputFeature']:S1_Feature,
-                                                                              Feed_dict['S2_InputHeatmap']:OutHeatMaps})
+                Sess.run(Ret_dict['S2_Optimizer'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:True})
+
             if Count % 100 == 0:
                 TestErr = 0
                 BatchErr = 0
 
                 if STAGE == 1:
-                    '''
-                    Stage1
-                    '''
-                    TestErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['S1_InputImage']:Ti,
-                                                            Feed_dict['S1_GroundTruth']:Tg,
-                                                            Feed_dict['S1_isTrain']:False})
-                    BatchErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['S1_InputImage']:I[RandomIdx],
-                                                             Feed_dict['S1_GroundTruth']:G[RandomIdx],
-                                                             Feed_dict['S1_isTrain']:False})
+                    TestErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:Ti,Feed_dict['GroundTruth']:Tg,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
+                    BatchErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                 else:
-                    '''
-                    Stage2
-                    '''
-                    S1Ret,S1_Feature = Sess.run([Ret_dict['S1_Ret'],Ret_dict['S1_Feature']],{Feed_dict['S1_InputImage']:I[RandomIdx],
-                                                                              Feed_dict['S1_GroundTruth']:G[RandomIdx],
-                                                                              Feed_dict['S1_isTrain']:False})
-            
-                    OutImages,OutShapes,OutGts,OutMs,OutHeatMaps = ConnectionLayer(I[RandomIdx],S1Ret,G[RandomIdx],MeanShape)
-                    BatchErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['S2_InputImage']:OutImages,
-                                                             Feed_dict['S2_GroundTruth']:OutGts,
-                                                             Feed_dict['S2_InputInitLandmark']:OutShapes,
-                                                             Feed_dict['S2_isTrain']:False,
-                                                             Feed_dict['S2_InputFeature']:S1_Feature,
-                                                             Feed_dict['S2_InputHeatmap']:OutHeatMaps})
-
-                    S1Ret,S1_Feature = Sess.run([Ret_dict['S1_Ret'],Ret_dict['S1_Feature']],{Feed_dict['S1_InputImage']:Ti,
-                                                                              Feed_dict['S1_GroundTruth']:Tg,
-                                                                              Feed_dict['S1_isTrain']:False})
-            
-                    OutImages,OutShapes,OutGts,OutMs,OutHeatMaps = ConnectionLayer(Ti,S1Ret,Tg,MeanShape)
-                    TestErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['S2_InputImage']:OutImages,
-                                                            Feed_dict['S2_GroundTruth']:OutGts,
-                                                            Feed_dict['S2_InputInitLandmark']:OutShapes,
-                                                            Feed_dict['S2_isTrain']:False,
-                                                            Feed_dict['S2_InputFeature']:S1_Feature,
-                                                            Feed_dict['S2_InputHeatmap']:OutHeatMaps})
-
+                    TestErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['InputImage']:Ti,Feed_dict['GroundTruth']:Tg,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
+                    BatchErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                 print(w,Count,'TestErr:',TestErr,' BatchErr:',BatchErr)
             Count += 1
     saver = tf.train.Saver()
