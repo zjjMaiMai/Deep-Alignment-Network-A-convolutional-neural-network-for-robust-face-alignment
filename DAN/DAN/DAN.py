@@ -495,11 +495,12 @@ Layers(MeanShape)
 STAGE = 1
 
 with tf.Session() as Sess:
+    Saver = tf.train.Saver()
+
     if STAGE == 1:
         Sess.run(tf.global_variables_initializer())
     else:
-        saver = tf.train.Saver()
-        saver.restore(Sess,'./Model/Model')
+        Saver.restore(Sess,'./Model/Model')
         print('Model Read Over!')
 
     for w in range(1000):
@@ -511,7 +512,7 @@ with tf.Session() as Sess:
             else:
                 Sess.run(Ret_dict['S2_Optimizer'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:True})
 
-            if Count % 100 == 101:
+            if Count % 256 == 0:
                 TestErr = 0
                 BatchErr = 0
 
@@ -519,15 +520,18 @@ with tf.Session() as Sess:
                     TestErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:Ti,Feed_dict['GroundTruth']:Tg,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                     BatchErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                 else:
-                    #Img,HeatMap,FeatureUpScale = Sess.run([Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
-                    #for i in range(64):
-                    #    cv2.imshow('Image',Img[i])
-                    #    cv2.imshow('HeatMap',HeatMap[i])
-                    #    cv2.imshow('FeatureUpScale',FeatureUpScale[i])
-                    #    cv2.waitKey(-1)
+                    '''
+                    Img,HeatMap,FeatureUpScale = Sess.run([Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
+                    for i in range(64):
+                        cv2.imshow('Image',Img[i])
+                        cv2.imshow('HeatMap',HeatMap[i])
+                        cv2.imshow('FeatureUpScale',FeatureUpScale[i])
+                        cv2.waitKey(-1)
+                    '''
                     TestErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['InputImage']:Ti,Feed_dict['GroundTruth']:Tg,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                     BatchErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                 print(w,Count,'TestErr:',TestErr,' BatchErr:',BatchErr)
             Count += 1
-    saver = tf.train.Saver()
-    saver.save(Sess,'./Model/Model')
+        Saver.save(Sess,'./Model/Model')
+
+
