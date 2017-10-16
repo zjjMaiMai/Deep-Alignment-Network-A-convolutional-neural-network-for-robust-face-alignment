@@ -248,6 +248,7 @@ class ImageServer(object):
 
         groundTruth = np.dot(groundTruth, A) + t
         return outImg, initShape, groundTruth
+
 def GetPaperDataset():
     trainSet = ImageServer.Load("C:\\Users\\ZhaoHang\\Desktop\\DeepAlignmentNetwork-master\\data\\dataset_nimgs=60960_perturbations=[0.2, 0.2, 20, 0.25]_size=[112, 112].npz")
     validationSet = ImageServer.Load("C:\\Users\\ZhaoHang\\Desktop\\DeepAlignmentNetwork-master\\data\\dataset_nimgs=100_perturbations=[]_size=[112, 112].npz")
@@ -320,19 +321,19 @@ pixels = np.array([(x, y) for x in range(112) for y in range(112)], dtype=np.flo
 Pixels = tf.constant(pixels,shape=[112 * 112,2])
 def AffineImage(Image,Transform,isInv=False):
     A = tf.reshape(Transform[:,0:4],[-1,2,2])
-    T = tf.slice(Transform,[0,4],[-1,-1])
+    T = tf.reshape(Transform[:,4:6],[-1,1,2])
 
     if isInv == False:
-        A = tf.map_fn(lambda x:tf.matrix_inverse(x),A)
-        T = tf.map_fn(lambda x:tf.tensordot(-x[0],x[1],1),(T,A),dtype=tf.float32)
+        A = tf.matrix_inverse(A)
+        T = tf.matmul(-T,A)
 
     def Do(I,a,t):
         I = tf.reshape(I,[112,112])
 
-        t = tf.gather(t,[1,0])
+        t = tf.gather_nd(t,[[0,1],[0,0]])
         a = tf.transpose(a)
 
-        SrcPixels = tf.tensordot(Pixels,a,1) + t
+        SrcPixels = tf.matmul(Pixels,a) + t
         SrcPixels = tf.clip_by_value(SrcPixels,0,112 - 1)
 
         SrcPixelsIdx = tf.reshape(tf.to_int32(SrcPixels),[112 * 112,2])
@@ -343,16 +344,14 @@ def AffineImage(Image,Transform,isInv=False):
 #test Good
 def AffineLandmark(Landmark, Transform,isInv=False):
     A = tf.reshape(Transform[:,0:4],[-1,2,2])
-    T = tf.slice(Transform,[0,4],[-1,-1])
+    T = tf.reshape(Transform[:,4:6],[-1,1,2])
+    Landmark = tf.reshape(Landmark,[-1,68,2])
 
     if isInv:
-        A = tf.map_fn(lambda x:tf.matrix_inverse(x),A)
-        T = tf.map_fn(lambda x:tf.tensordot(-x[0],x[1],1),(T,A),dtype=tf.float32)
+        A = tf.matrix_inverse(A)
+        T = tf.matmul(-T,A)
 
-    def Do(L,a,t):
-        return tf.reshape(tf.tensordot(tf.reshape(L,[-1, 2]), a,1) + t,[-1])
-     
-    return tf.map_fn(lambda a:Do(a[0],a[1],a[2]) ,(Landmark,A,T),dtype=tf.float32)
+    return tf.reshape(tf.matmul(Landmark,A) + T,[-1,136])
 
 #test Good
 HalfSize = 8
@@ -497,7 +496,7 @@ STAGE = 1
 with tf.Session() as Sess:
     Saver = tf.train.Saver()
 
-    if STAGE == 1:
+    if STAGE == 0:
         Sess.run(tf.global_variables_initializer())
     else:
         Saver.restore(Sess,'./Model/Model')
@@ -507,7 +506,7 @@ with tf.Session() as Sess:
         Count = 0
         while Count * 64 < I.shape[0]  :
             RandomIdx = np.random.choice(I.shape[0],64,False)
-            if STAGE == 1:
+            if STAGE == 1 or STAGE == 0:
                 Sess.run(Ret_dict['S1_Optimizer'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:True,Feed_dict['S2_isTrain']:False})
             else:
                 Sess.run(Ret_dict['S2_Optimizer'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:True})
@@ -516,22 +515,18 @@ with tf.Session() as Sess:
                 TestErr = 0
                 BatchErr = 0
 
-                if STAGE == 1:
+                if STAGE == 1 or STAGE == 0:
                     TestErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:Ti,Feed_dict['GroundTruth']:Tg,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                     BatchErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                 else:
-                    '''
-                    Img,HeatMap,FeatureUpScale = Sess.run([Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
-                    for i in range(64):
-                        cv2.imshow('Image',Img[i])
-                        cv2.imshow('HeatMap',HeatMap[i])
-                        cv2.imshow('FeatureUpScale',FeatureUpScale[i])
-                        cv2.waitKey(-1)
-                    '''
+                    #Img,HeatMap,FeatureUpScale = Sess.run([Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
+                    #for i in range(64):
+                    #    cv2.imshow('Image',Img[i])
+                    #    cv2.imshow('HeatMap',HeatMap[i])
+                    #    cv2.imshow('FeatureUpScale',FeatureUpScale[i])
+                    #    cv2.waitKey(-1)
                     TestErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['InputImage']:Ti,Feed_dict['GroundTruth']:Tg,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                     BatchErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                 print(w,Count,'TestErr:',TestErr,' BatchErr:',BatchErr)
             Count += 1
         Saver.save(Sess,'./Model/Model')
-
-
