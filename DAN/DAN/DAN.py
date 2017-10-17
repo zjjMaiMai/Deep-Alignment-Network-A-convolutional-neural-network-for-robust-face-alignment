@@ -1,9 +1,8 @@
 import tensorflow as tf
 import numpy as np  
 import itertools
-from tensorflow.python.client import timeline 
-from tensorflow.python import debug as tf_debug
 import cv2
+import time
 
 class ImageServer(object):
     def __init__(self, imgSize=[112, 112], frameFraction=0.25, initialization='box', color=False):
@@ -317,8 +316,7 @@ def GetAffineParam(ShapesFrom,ShapeTo):
     return tf.map_fn(lambda c: Do(c ,ShapeTo),ShapesFrom)
 
 #test Good
-pixels = np.array([(x, y) for x in range(112) for y in range(112)], dtype=np.float32)
-Pixels = tf.constant(pixels,shape=[112 * 112,2])
+Pixels = tf.constant(np.array([(x, y) for x in range(112) for y in range(112)], dtype=np.float32),shape=[112,112,2])
 def AffineImage(Image,Transform,isInv=False):
     A = tf.reshape(Transform[:,0:4],[-1,2,2])
     T = tf.reshape(Transform[:,4:6],[-1,1,2])
@@ -327,55 +325,42 @@ def AffineImage(Image,Transform,isInv=False):
         A = tf.matrix_inverse(A)
         T = tf.matmul(-T,A)
 
+    T = tf.reverse(T,[-1])
+    A = tf.matrix_transpose(A)
+
     def Do(I,a,t):
         I = tf.reshape(I,[112,112])
 
-        t = tf.gather_nd(t,[[0,1],[0,0]])
-        a = tf.transpose(a)
-
-        SrcPixels = tf.matmul(Pixels,a) + t
+        SrcPixels = tf.matmul(tf.reshape(Pixels,[112 * 112,2]),a) + t
         SrcPixels = tf.clip_by_value(SrcPixels,0,112 - 1)
 
         SrcPixelsIdx = tf.reshape(tf.to_int32(SrcPixels),[112 * 112,2])
         OutImage = tf.gather_nd(I,SrcPixelsIdx)
+
         return tf.reshape(OutImage,[112,112,1])
     return tf.map_fn(lambda a:Do(a[0],a[1],a[2]),(Image,A,T),dtype=tf.float32)
-
 #test Good
 def AffineLandmark(Landmark, Transform,isInv=False):
     A = tf.reshape(Transform[:,0:4],[-1,2,2])
     T = tf.reshape(Transform[:,4:6],[-1,1,2])
-    Landmark = tf.reshape(Landmark,[-1,68,2])
 
+    Landmark = tf.reshape(Landmark,[-1,68,2])
     if isInv:
         A = tf.matrix_inverse(A)
         T = tf.matmul(-T,A)
-
     return tf.reshape(tf.matmul(Landmark,A) + T,[-1,136])
 
-#test Good
-HalfSize = 8
-offsets = tf.constant(np.array(list(itertools.product(range(-HalfSize,HalfSize + 1), range(-HalfSize,HalfSize + 1)))),tf.float32)
 def GetHeatMap(Landmark):
+    HalfSize = 8
     def Do(L):
         def DoIn(Point):
-            intLandmark = tf.round(Point)
-            locations = offsets + intLandmark
-
-            dxdy = Point - intLandmark
-            offsetsSubPix = offsets - dxdy
-
-            vals = 1 / (1 + tf.sqrt(tf.reduce_sum(offsetsSubPix * offsetsSubPix,1)))    
-            idxFloat = tf.stack((locations[:,1],locations[:,0]),axis=1)   
-            return tf.sparse_to_dense(tf.to_int32(idxFloat),[112,112],vals,validate_indices=False)
-
-        Landmarks = tf.reshape(L,[-1,2])
+            return Pixels - Point
+        Landmarks = tf.reverse(tf.reshape(L,[-1,2]),[-1])
         Landmarks = tf.clip_by_value(Landmarks,HalfSize,112 - 1 - HalfSize)
-        Ret = tf.map_fn(lambda c : DoIn(c),Landmarks)
+        Ret = 1 / (tf.norm(tf.map_fn(DoIn,Landmarks),axis = 3) + 1)
         Ret = tf.reshape(tf.reduce_max(Ret,0),[112,112,1])
         return Ret
-    return tf.map_fn(lambda c:Do(c),Landmark)
-
+    return tf.map_fn(Do,Landmark)
 #test Good
 def PredictErr(GroudTruth,Predict):
     Gt = tf.reshape(GroudTruth,[-1,68,2])
@@ -491,16 +476,25 @@ def Layers(Mshape=None):
 
 I,G,Ti,Tg,MeanShape = GetPaperDataset()
 Layers(MeanShape)
-STAGE = 1
+STAGE = 2
+
 
 with tf.Session() as Sess:
     Saver = tf.train.Saver()
-
+    Writer = tf.summary.FileWriter("logs/", Sess.graph)
     if STAGE == 0:
         Sess.run(tf.global_variables_initializer())
     else:
         Saver.restore(Sess,'./Model/Model')
         print('Model Read Over!')
+       
+    #IN = I[0:64]
+    #INGT = G[0:64]
+    #for i in range(8):
+    #    start = time.clock()
+    #    Sess.run([Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:IN,Feed_dict['GroundTruth']:INGT,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
+    #    end = time.clock()
+    #    print("read: %f ms" % ((end - start) * 1000.0))
 
     for w in range(1000):
         Count = 0
@@ -519,8 +513,13 @@ with tf.Session() as Sess:
                     TestErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:Ti,Feed_dict['GroundTruth']:Tg,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                     BatchErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                 else:
-                    #Img,HeatMap,FeatureUpScale = Sess.run([Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
+                    #Landmark,Img,HeatMap,FeatureUpScale = Sess.run([Ret_dict['S2_InputLandmark'],Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                     #for i in range(64):
+                    #    TestImage = np.zeros([112,112,1])
+                    #    for p in range(68):
+                    #        cv2.circle(TestImage,(int(Landmark[i][p * 2]),int(Landmark[i][p * 2 + 1])),1,(255),-1)
+
+                    #    cv2.imshow('Landmark',TestImage)
                     #    cv2.imshow('Image',Img[i])
                     #    cv2.imshow('HeatMap',HeatMap[i])
                     #    cv2.imshow('FeatureUpScale',FeatureUpScale[i])
@@ -530,3 +529,4 @@ with tf.Session() as Sess:
                 print(w,Count,'TestErr:',TestErr,' BatchErr:',BatchErr)
             Count += 1
         Saver.save(Sess,'./Model/Model')
+
