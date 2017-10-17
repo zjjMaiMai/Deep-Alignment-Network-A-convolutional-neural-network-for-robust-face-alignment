@@ -334,9 +334,17 @@ def AffineImage(Image,Transform,isInv=False):
         SrcPixels = tf.matmul(tf.reshape(Pixels,[112 * 112,2]),a) + t
         SrcPixels = tf.clip_by_value(SrcPixels,0,112 - 1)
 
-        SrcPixelsIdx = tf.reshape(tf.to_int32(SrcPixels),[112 * 112,2])
-        OutImage = tf.gather_nd(I,SrcPixelsIdx)
+        outPixelsMinMin = tf.to_float(tf.to_int32(SrcPixels))
+        dxdy = SrcPixels - outPixelsMinMin
+        dx = dxdy[:,0]
+        dy = dxdy[:,1]
 
+        outPixelsMinMin = tf.reshape(tf.to_int32(outPixelsMinMin),[112 * 112,2])
+        outPixelsMaxMin = tf.reshape(outPixelsMinMin + [1, 0],[112 * 112,2])
+        outPixelsMinMax = tf.reshape(outPixelsMinMin + [0, 1],[112 * 112,2])
+        outPixelsMaxMax = tf.reshape(outPixelsMinMin + [1, 1],[112 * 112,2])
+
+        OutImage = (1 - dx) * (1 - dy) * tf.gather_nd(I,outPixelsMinMin) + dx * (1 - dy) * tf.gather_nd(I,outPixelsMaxMin) + (1 - dx) * dy * tf.gather_nd(I,outPixelsMinMax) + dx * dy * tf.gather_nd(I,outPixelsMaxMax)
         return tf.reshape(OutImage,[112,112,1])
     return tf.map_fn(lambda a:Do(a[0],a[1],a[2]),(Image,A,T),dtype=tf.float32)
 #test Good
@@ -488,13 +496,13 @@ with tf.Session() as Sess:
         Saver.restore(Sess,'./Model/Model')
         print('Model Read Over!')
        
-    #IN = I[0:64]
-    #INGT = G[0:64]
-    #for i in range(8):
-    #    start = time.clock()
-    #    Sess.run([Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:IN,Feed_dict['GroundTruth']:INGT,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
-    #    end = time.clock()
-    #    print("read: %f ms" % ((end - start) * 1000.0))
+    IN = I[0:64]
+    INGT = G[0:64]
+    for i in range(8):
+        start = time.clock()
+        Sess.run([Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:IN,Feed_dict['GroundTruth']:INGT,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
+        end = time.clock()
+        print("read: %f ms" % ((end - start) * 1000.0))
 
     for w in range(1000):
         Count = 0
@@ -513,17 +521,18 @@ with tf.Session() as Sess:
                     TestErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:Ti,Feed_dict['GroundTruth']:Tg,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                     BatchErr = Sess.run(Ret_dict['S1_Cost'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                 else:
-                    #Landmark,Img,HeatMap,FeatureUpScale = Sess.run([Ret_dict['S2_InputLandmark'],Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
-                    #for i in range(64):
-                    #    TestImage = np.zeros([112,112,1])
-                    #    for p in range(68):
-                    #        cv2.circle(TestImage,(int(Landmark[i][p * 2]),int(Landmark[i][p * 2 + 1])),1,(255),-1)
+                    Landmark,Img,HeatMap,FeatureUpScale = Sess.run([Ret_dict['S2_InputLandmark'],Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
+                    for i in range(64):
+                        TestImage = np.zeros([112,112,1])
+                        for p in range(68):
+                            cv2.circle(TestImage,(int(Landmark[i][p *
+                            2]),int(Landmark[i][p * 2 + 1])),1,(255),-1)
 
-                    #    cv2.imshow('Landmark',TestImage)
-                    #    cv2.imshow('Image',Img[i])
-                    #    cv2.imshow('HeatMap',HeatMap[i])
-                    #    cv2.imshow('FeatureUpScale',FeatureUpScale[i])
-                    #    cv2.waitKey(-1)
+                        cv2.imshow('Landmark',TestImage)
+                        cv2.imshow('Image',Img[i])
+                        cv2.imshow('HeatMap',HeatMap[i])
+                        cv2.imshow('FeatureUpScale',FeatureUpScale[i])
+                        cv2.waitKey(-1)
                     TestErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['InputImage']:Ti,Feed_dict['GroundTruth']:Tg,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                     BatchErr = Sess.run(Ret_dict['S2_Cost'],{Feed_dict['InputImage']:I[RandomIdx],Feed_dict['GroundTruth']:G[RandomIdx],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
                 print(w,Count,'TestErr:',TestErr,' BatchErr:',BatchErr)
