@@ -23,10 +23,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="DAN.py" />
-    <Compile Include="FaceAlignment.py">
-      <SubType>Code</SubType>
-    </Compile>
-    <Compile Include="ImagePip.py">
+    <Compile Include="DataSetPre.py">
       <SubType>Code</SubType>
     </Compile>
   </ItemGroup>

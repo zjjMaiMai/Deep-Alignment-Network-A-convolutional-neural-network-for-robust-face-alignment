@@ -251,3 +251,8 @@ ModelManifest.xml
 /DAN/DAN/SeeLog.bat
 *.DESKTOP-0FB5JVH
 *.json
+/DAN/DAN/Jelo
+/DAN/DAN/Model_
+/DAN/DAN/__pycache__
+*.txt
+*.npy
