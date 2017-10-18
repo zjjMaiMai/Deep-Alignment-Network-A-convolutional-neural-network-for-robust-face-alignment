@@ -7,7 +7,7 @@ Pts
 '''
 
 IMGSIZE = 112
-LANDMARK = 36
+LANDMARK = 68
 MIRRORS = True
 DATASCALE = 5
 
@@ -50,9 +50,9 @@ def RandomSRT(img,landmark,MeanShape,isTrainSet):
         return Img,SrcLandmark
 
     for i in range(DATASCALE):
-        angle = np.random.normal(0, 10) * np.pi / 180
+        angle = np.random.normal(0, 5 * np.pi / 180) 
         offset = [np.random.normal(0, 0.1) * IMGSIZE, np.random.normal(0, 0.1) * IMGSIZE]
-        scaling = np.random.normal(1, 1.2)
+        scaling = np.random.normal(1, 0.1)
 
         r = np.array([[np.cos(angle), -np.sin(angle)],[np.sin(angle), np.cos(angle)]]) * scaling
         Landmark = np.dot(SrcLandmark,r) + offset
@@ -136,13 +136,13 @@ def ReadList(List,Name,isTrainSet=True):
     LandmarkFileName = []
     for s in File:
         ImageFileName.append(s[:-1])
-        #LandmarkFileName.append(s[:-4] + 'pts')
+        LandmarkFileName.append(s[:-4] + 'pts')
         #For jeloTest
-        ptspath = s[:-4] + 'pts'
-        (filepath,tempfilename) = os.path.split(ptspath)
-        (filename,extension) = os.path.splitext(tempfilename)
-        ptspath = filepath + '\\' + str(int(filename) - 1) + extension
-        LandmarkFileName.append(ptspath)
+        #ptspath = s[:-4] + 'pts'
+        #(filepath,tempfilename) = os.path.split(ptspath)
+        #(filename,extension) = os.path.splitext(tempfilename)
+        #ptspath = filepath + '\\' + str(int(filename) - 1) + extension
+        #LandmarkFileName.append(ptspath)
 
     
     LandmarkVec = []
@@ -160,12 +160,6 @@ def ReadList(List,Name,isTrainSet=True):
 
         if MIRRORS:
             Imirror,Lmirror = GetMirror(img,landmark)
-
-            #for i in range(LANDMARK):
-            #    cv2.circle(Imirror,(int(Lmirror[i,0]),int(Lmirror[i,1])),2,(255),-1)
-            #cv2.imshow('Im',Imirror)
-            #cv2.waitKey(-1)
-
             I,L = RandomSRT(Imirror,Lmirror,MeanShape,isTrainSet)
             LandmarkVec.append(L)
             ImageVec.append(I)
@@ -173,16 +167,16 @@ def ReadList(List,Name,isTrainSet=True):
         Count += 1
         print(Count)
 
-    ImageVec = np.array(ImageVec).astype(np.float32).reshape((-1,IMGSIZE,IMGSIZE,1))
+    ImageVec = np.array(ImageVec).astype(np.float32).reshape((-1,IMGSIZE,IMGSIZE,1)) / 255.0
     LandmarkVec = np.array(LandmarkVec).astype(np.float32).reshape((-1,LANDMARK * 2))
     MeanShape = np.reshape(MeanShape,(-1)).astype(np.float32)
-
    
     np.save(Name + '_Image',ImageVec)
     np.save(Name + '_Landmark',LandmarkVec)
     np.save(Name + '_MeanShape',MeanShape)
+
     return
 
         
-ReadList('D:\\work\\FaceAlignment\\CNN_DAN\\DAN\\DAN\\JeloList.txt','JeloTrain',True)
-#ReadList('D:\\Dataset\\PaperTest.txt','s',True)
+#ReadList('D:\\Dataset\\PaperTrain.txt','300W',True)
+ReadList('D:\\Dataset\\IbugList.txt','IbugTest',False)

@@ -5,7 +5,7 @@ import cv2
 import time
 
 IMGSIZE = 112
-LANDMARK = 36
+LANDMARK = 68
 
 LEFTEYE_START = 0
 LEFTEYE_END = 0
@@ -224,16 +224,22 @@ def Layers(Mshape=None):
 
 
 
-#I,G,Ti,Tg,MeanShape = GetPaperDataset()
-I = np.load('JeloTrain_Image.npy').astype(np.float32)
-G = np.load('JeloTrain_Landmark.npy').astype(np.float32)
-Ti = I[0:256]
-Tg = G[0:256]
-I = I[256:]
-G = G[256:]
+#I = np.load('JeloTrain_Image.npy').astype(np.float32)
+#G = np.load('JeloTrain_Landmark.npy').astype(np.float32)
+#Ti = I[0:256]
+#Tg = G[0:256]
+#I = I[256:]
+#G = G[256:]
+#MeanShape = np.load('JeloTrain_MeanShape.npy').astype(np.float32).reshape(-1)
 
-MeanShape = np.load('JeloTrain_MeanShape.npy').astype(np.float32).reshape(-1)
+I = np.load('300W_Image.npy')
+G = np.load('300W_Landmark.npy')
+MeanShape = np.load('300W_MeanShape.npy')
 
+Ti = np.load('IbugTest_Image.npy')
+Tg = np.load('IbugTest_Landmark.npy')
+
+print(I.shape[0])
 
 Layers(MeanShape)
 STAGE = 0
