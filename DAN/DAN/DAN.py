@@ -3,6 +3,7 @@ import numpy as np
 import itertools
 import cv2
 import time
+from scipy import ndimage
 
 IMGSIZE = 112
 LANDMARK = 68
@@ -222,27 +223,177 @@ def Layers(Mshape=None):
         Ret_dict['S2_FeatureUpScale'] = S2_FeatureUpScale
     return
 
+def JeloTest(Shape,Sess):
+
+    def transform(form,to):
+        destMean = np.mean(to, axis=0)
+        srcMean = np.mean(form, axis=0)
+
+        srcVec = (form - srcMean).flatten()
+        destVec = (to - destMean).flatten()
+
+        a = np.dot(srcVec, destVec) / np.linalg.norm(srcVec) ** 2
+        b = 0
+        for i in range(form.shape[0]):
+            b += srcVec[2 * i] * destVec[2 * i + 1] - srcVec[2 * i + 1] * destVec[2 * i] 
+        b = b / np.linalg.norm(srcVec) ** 2
+
+        T = np.array([[a, b], [-b, a]])
+        srcMean = np.dot(srcMean, T)
+
+        return T, destMean - srcMean
+
+    initLandmark = np.array([[142.276932,298.257019],
+        [198.306290,300.303680],
+        [204.209900,321.991486],
+        [128.933411,326.152954],
+        [286.840668,323.690918],
+        [296.065277,302.031494],
+        [347.137054,309.349060],
+        [352.773895,334.986145],
+        [144.340683,362.945618],
+        [171.983276,347.863495],
+        [201.002991,359.234192],
+        [171.996918,368.796600],
+        [285.312592,363.825684],
+        [316.107147,355.429962],
+        [342.870148,372.732086],
+        [313.159668,376.430511],
+        [188.402573,496.530182],
+        [200.569229,482.153229],
+        [221.423798,475.474884],
+        [238.420578,479.840332],
+        [255.591629,477.686157],
+        [273.992218,486.573059],
+        [286.708618,502.069000],
+        [273.553467,516.843567],
+        [256.615479,526.680115],
+        [237.759949,527.476990],
+        [219.077271,524.133423],
+        [200.404175,513.671265],
+        [201.942215,496.860443],
+        [217.904770,494.473602],
+        [238.952606,494.496460],
+        [262.185150,496.672821],
+        [275.234283,501.618683],
+        [261.826233,502.228607],
+        [240.554810,501.575562],
+        [218.696976,499.738373]],dtype = np.float32)
+    Shape = Shape.reshape(LANDMARK,2)
+
+    Device = cv2.VideoCapture('D:\\work\\FaceAlignment\\CNN_DAN\\DAN\\DAN\\Jelo\\zhao.mp4')
+    while True:
+        _,Frame = Device.read()
+        FrameGray = cv2.cvtColor(Frame,cv2.COLOR_BGR2GRAY)
+
+        A,T = transform(initLandmark,Shape)
+        A = np.linalg.inv(A)
+        T = np.dot(-T, A)
+        Img = ndimage.interpolation.affine_transform(FrameGray,A,T[[1,0]],output_shape=(IMGSIZE,IMGSIZE))
+        Img = np.reshape(Img,(IMGSIZE,IMGSIZE,1)).astype(np.float32) / 255.0
+        RetLandmark = Sess.run(Ret_dict['S1_Ret'],{Feed_dict['InputImage']:[Img],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})[0].reshape(LANDMARK,2)
+
+        initLandmark = np.dot(RetLandmark,A) + T
+        
+        for i in range(LANDMARK):
+            cv2.circle(Frame,(int(initLandmark[i,0]),int(initLandmark[i,1])),3,(0,255,0),-1)
+
+        cv2.imshow('JeloTest',Frame)
+        cv2.waitKey(15)
 
 
-#I = np.load('JeloTrain_Image.npy').astype(np.float32)
-#G = np.load('JeloTrain_Landmark.npy').astype(np.float32)
-#Ti = I[0:256]
-#Tg = G[0:256]
-#I = I[256:]
-#G = G[256:]
-#MeanShape = np.load('JeloTrain_MeanShape.npy').astype(np.float32).reshape(-1)
+def Landmark68Test(Shape,ImgMean,ImgStd,Sess):
 
-I = np.load('300W_Image.npy')
-G = np.load('300W_Landmark.npy')
-MeanShape = np.load('300W_MeanShape.npy')
+    def transform(form,to):
+        destMean = np.mean(to, axis=0)
+        srcMean = np.mean(form, axis=0)
 
-Ti = np.load('IbugTest_Image.npy')
-Tg = np.load('IbugTest_Landmark.npy')
+        srcVec = (form - srcMean).flatten()
+        destVec = (to - destMean).flatten()
 
-print(I.shape[0])
+        a = np.dot(srcVec, destVec) / np.linalg.norm(srcVec) ** 2
+        b = 0
+        for i in range(form.shape[0]):
+            b += srcVec[2 * i] * destVec[2 * i + 1] - srcVec[2 * i + 1] * destVec[2 * i] 
+        b = b / np.linalg.norm(srcVec) ** 2
+
+        T = np.array([[a, b], [-b, a]])
+        srcMean = np.dot(srcMean, T)
+
+        return T, destMean - srcMean
+
+    Shape = Shape.reshape(LANDMARK,2)
+
+    Device = cv2.VideoCapture(0)
+    # VideoWriter = cv2.VideoWriter('OutMy.avi',cv2.VideoWriter_fourcc(*'XVID'),30,(640,480))
+    Cascade = cv2.CascadeClassifier('haarcascade_frontalface_alt.xml')
+    Rest = True
+    initLandmark = None
+
+    while True:
+        _,Frame = Device.read()
+        FrameGray = cv2.cvtColor(Frame,cv2.COLOR_BGR2GRAY)
+
+        if Rest:
+            Rects = Cascade.detectMultiScale(FrameGray, scaleFactor=1.2, minNeighbors=3, minSize=(50, 50))
+            if len(Rects) > 0:
+                #print( [Rects[0][0],[Rects[0][1]]])
+                #print(Shape / IMGSIZE * min(Rects[0][2],Rects[0][3]))
+                initLandmark = Shape / IMGSIZE * min(Rects[0][2],Rects[0][3]) + [Rects[0][0],Rects[0][1]]
+                A,T = transform(initLandmark,Shape)
+                A = np.linalg.inv(A)
+                T = np.dot(-T, A)
+                Img = ndimage.interpolation.affine_transform(FrameGray,A,T[[1,0]],output_shape=(IMGSIZE,IMGSIZE))
+                Img = np.reshape(Img,(IMGSIZE,IMGSIZE,1)).astype(np.float32) / 255.0
+                Img = (Img - ImgMean) / ImgStd
+                RetLandmark = Sess.run(Ret_dict['S2_Ret'],{Feed_dict['InputImage']:[Img],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})[0].reshape(LANDMARK,2)
+                initLandmark = np.dot(RetLandmark,A) + T
+                initLandmark = np.round(initLandmark).astype(np.int32)
+                for i in range(LANDMARK):
+                    cv2.circle(Frame,(initLandmark[i,0],initLandmark[i,1]),2,(0,255,0),-1)
+                Rest = False
+        else:
+            A,T = transform(initLandmark,Shape)
+            A = np.linalg.inv(A)
+            T = np.dot(-T, A)
+            Img = ndimage.interpolation.affine_transform(FrameGray,A,T[[1,0]],output_shape=(IMGSIZE,IMGSIZE))
+            Img = np.reshape(Img,(IMGSIZE,IMGSIZE,1)).astype(np.float32) / 255.0
+            Img = (Img - ImgMean) / ImgStd
+            RetLandmark = Sess.run(Ret_dict['S2_Ret'],{Feed_dict['InputImage']:[Img],Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})[0].reshape(LANDMARK,2)
+            initLandmark = np.dot(RetLandmark,A) + T
+            initLandmark = np.round(initLandmark).astype(np.int32)
+            for i in range(LANDMARK):
+                cv2.circle(Frame,(initLandmark[i,0],initLandmark[i,1]),2,(0,255,0),-1)
+
+
+        cv2.imshow('Test',Frame)
+        if cv2.waitKey(1) == 32:
+            Rest = True
+        # VideoWriter.write(Frame)
+
+_300W = np.load('AllDataset.npz')
+I = _300W['Image']
+G = _300W['Landmark']
+MeanShape = _300W['MeanShape']
+ImageMean = _300W['ImgMean']
+ImageStd = _300W['ImgStd']
+
+_300WTest = np.load('300WTestCommon.npz')
+Ti = _300WTest['Image']
+Tg = _300WTest['Landmark']
+
+
+#for i in range(500):
+#    for k in range(68):
+#        cv2.circle(I[i],(int(G[i][k * 2]),int(G[i][k * 2 + 1])),1,(255))
+#        cv2.circle(Ti[i],(int(Tg[i][k * 2]),int(Tg[i][k * 2 + 1])),1,(255))
+
+#    cv2.imshow('TrainSrc',I[i])
+#    cv2.imshow('TestSrc',Ti[i])
+#    cv2.waitKey(-1)
 
 Layers(MeanShape)
-STAGE = 0
+STAGE = 2
 
 with tf.Session() as Sess:
     Saver = tf.train.Saver()
@@ -253,13 +404,7 @@ with tf.Session() as Sess:
         Saver.restore(Sess,'./Model/Model')
         print('Model Read Over!')
        
-    #IN = I[0:64]
-    #INGT = G[0:64]
-    #for i in range(8):
-    #    start = time.clock()
-    #    Sess.run([Ret_dict['S2_InputImage'],Ret_dict['S2_InputHeatmap'],Ret_dict['S2_FeatureUpScale']],{Feed_dict['InputImage']:IN,Feed_dict['GroundTruth']:INGT,Feed_dict['S1_isTrain']:False,Feed_dict['S2_isTrain']:False})
-    #    end = time.clock()
-    #    print("read: %f ms" % ((end - start) * 1000.0))
+    Landmark68Test(MeanShape,ImageMean,ImageStd,Sess)
 
     for w in range(1000):
         Count = 0
@@ -296,4 +441,3 @@ with tf.Session() as Sess:
                 print(w,Count,'TestErr:',TestErr,' BatchErr:',BatchErr)
             Count += 1
         Saver.save(Sess,'./Model/Model')
-

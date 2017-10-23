@@ -9,7 +9,25 @@ Pts
 IMGSIZE = 112
 LANDMARK = 68
 MIRRORS = True
-DATASCALE = 5
+DATASCALE = 10
+
+def transform(form,to):
+    destMean = np.mean(to, axis=0)
+    srcMean = np.mean(form, axis=0)
+
+    srcVec = (form - srcMean).flatten()
+    destVec = (to - destMean).flatten()
+
+    a = np.dot(srcVec, destVec) / np.linalg.norm(srcVec) ** 2
+    b = 0
+    for i in range(form.shape[0]):
+        b += srcVec[2 * i] * destVec[2 * i + 1] - srcVec[2 * i + 1] * destVec[2 * i] 
+    b = b / np.linalg.norm(srcVec) ** 2
+
+    T = np.array([[a, b], [-b, a]])
+    srcMean = np.dot(srcMean, T)
+
+    return T, destMean - srcMean
 
 def ReadPts(path):
     landmarks = np.genfromtxt(path, skip_header=3, skip_footer=1)
@@ -17,45 +35,54 @@ def ReadPts(path):
 
     return landmarks
 
+def bestFitRect(points, meanS, box=None):
+    if box is None:
+        box = np.array([points[:,0].min(), points[:, 1].min(), points[:, 0].max(), points[:, 1].max()])
+    boxCenter = np.array([(box[0] + box[2]) / 2, (box[1] + box[3]) / 2])
+
+    boxWidth = box[2] - box[0]
+    boxHeight = box[3] - box[1]
+
+    meanShapeWidth = meanS[:, 0].max() - meanS[:, 0].min()
+    meanShapeHeight = meanS[:, 1].max() - meanS[:, 1].min()
+
+    scaleWidth = boxWidth / meanShapeWidth
+    scaleHeight = boxHeight / meanShapeHeight
+    scale = (scaleWidth + scaleHeight) / 2
+
+    S0 = meanS * scale
+
+    S0Center = [(S0[:, 0].min() + S0[:, 0].max()) / 2, (S0[:, 1].min() + S0[:, 1].max()) / 2]    
+    S0 += boxCenter - S0Center
+
+    return S0
+
 def RandomSRT(img,landmark,MeanShape,isTrainSet):
-
-    def transform(form,to):
-        destMean = np.mean(to, axis=0)
-        srcMean = np.mean(form, axis=0)
-
-        srcVec = (form - srcMean).flatten()
-        destVec = (to - destMean).flatten()
-
-        a = np.dot(srcVec, destVec) / np.linalg.norm(srcVec) ** 2
-        b = 0
-        for i in range(form.shape[0]):
-            b += srcVec[2 * i] * destVec[2 * i + 1] - srcVec[2 * i + 1] * destVec[2 * i] 
-        b = b / np.linalg.norm(srcVec) ** 2
-
-        T = np.array([[a, b], [-b, a]])
-        srcMean = np.dot(srcMean, T)
-
-        return T, destMean - srcMean
-
     ImgVec = []
     LandVec = []
+
+    if not isTrainSet:
+        FitLandmark = bestFitRect(MeanShape,landmark)
+        R,T = transform(landmark,FitLandmark)
+        R = np.linalg.inv(R)
+        T = np.dot(-T, R)
+        Img = ndimage.interpolation.affine_transform(img,R,T[[1,0]],output_shape=(IMGSIZE,IMGSIZE))
+        return Img,FitLandmark
 
     R,T = transform(landmark,MeanShape)
     SrcLandmark = np.dot(landmark,R) + T
 
-    if isTrainSet == False:
-        R2 = np.linalg.inv(R)
-        T2 = np.dot(-T, R2)
-        Img = ndimage.interpolation.affine_transform(img,R2,T2[[1,0]],output_shape=(IMGSIZE,IMGSIZE))
-        return Img,SrcLandmark
-
     for i in range(DATASCALE):
-        angle = np.random.normal(0, 5 * np.pi / 180) 
-        offset = [np.random.normal(0, 0.1) * IMGSIZE, np.random.normal(0, 0.1) * IMGSIZE]
-        scaling = np.random.normal(1, 0.1)
+        angle = np.random.normal(0, 15 * np.pi / 180) 
+        offset = [np.random.normal(0,0.05 * IMGSIZE) , np.random.normal(0, 0.05 * IMGSIZE)]
+        scaling = np.random.normal(1,0.1)
 
         r = np.array([[np.cos(angle), -np.sin(angle)],[np.sin(angle), np.cos(angle)]]) * scaling
-        Landmark = np.dot(SrcLandmark,r) + offset
+
+        #TSR
+        Landmark = SrcLandmark + offset
+        Landmark = (Landmark - Landmark.mean(axis=0)) * scaling + Landmark.mean(axis=0)
+        Landmark = np.dot(Landmark - Landmark.mean(axis=0),r) + Landmark.mean(axis=0)
 
         R,T = transform(landmark,Landmark)
         R2 = np.linalg.inv(R)
@@ -65,10 +92,9 @@ def RandomSRT(img,landmark,MeanShape,isTrainSet):
 
         ImgVec.append(Img)
         LandVec.append(Landmark)
-
     return ImgVec,LandVec
     
-def GetMeanShape(Shape):
+def GetMeanShape(Shape=None):
     xmax = Shape[:,0].max()
     ymax = Shape[:,1].max()
     xmin = Shape[:,0].min()
@@ -130,7 +156,7 @@ def GetMirror(Image,Landmark):
         OutImage = cv2.flip(Image,1)
         return OutImage,OutLandmark
 
-def ReadList(List,Name,isTrainSet=True):
+def ReadList(List,Name,isTrainSet=True,MeanShape=None,ImgMean=None,ImgStd=None):
     File = open(List,'r').readlines()
     ImageFileName = []
     LandmarkFileName = []
@@ -149,16 +175,27 @@ def ReadList(List,Name,isTrainSet=True):
     ImageVec = []
     Count = 0
 
-    MeanShape = GetMeanShape(ReadPts(LandmarkFileName[0]))
+    if isTrainSet:
+        CountPts = 0
+        MeanShape = 0
+        for P in LandmarkFileName:
+            s = ReadPts(P)
+            if s.shape[0] != LANDMARK:
+                continue
+            MeanShape += GetMeanShape(s)
+            CountPts += 1
+        MeanShape = MeanShape / CountPts
 
     for ImagePath,PtsPath in zip(ImageFileName,LandmarkFileName):
         landmark = ReadPts(PtsPath)
+        if landmark.shape[0] != LANDMARK:
+            continue
         img = cv2.imread(ImagePath,cv2.IMREAD_GRAYSCALE)
         I,L = RandomSRT(img,landmark,MeanShape,isTrainSet)
         LandmarkVec.append(L)
         ImageVec.append(I)
 
-        if MIRRORS:
+        if isTrainSet and MIRRORS:
             Imirror,Lmirror = GetMirror(img,landmark)
             I,L = RandomSRT(Imirror,Lmirror,MeanShape,isTrainSet)
             LandmarkVec.append(L)
@@ -170,13 +207,21 @@ def ReadList(List,Name,isTrainSet=True):
     ImageVec = np.array(ImageVec).astype(np.float32).reshape((-1,IMGSIZE,IMGSIZE,1)) / 255.0
     LandmarkVec = np.array(LandmarkVec).astype(np.float32).reshape((-1,LANDMARK * 2))
     MeanShape = np.reshape(MeanShape,(-1)).astype(np.float32)
-   
-    np.save(Name + '_Image',ImageVec)
-    np.save(Name + '_Landmark',LandmarkVec)
-    np.save(Name + '_MeanShape',MeanShape)
 
-    return
+
+    if isTrainSet:
+        ImgMean = ImageVec.mean(axis=0)
+        ImgStd = np.std(ImageVec,axis=0)
+        ImageVec = (ImageVec - ImgMean) / ImgStd
+        ToSave = {'Image':ImageVec,'Landmark':LandmarkVec,'MeanShape':MeanShape,'ImgMean':ImgMean,'ImgStd':ImgStd}
+        np.savez(Name,**ToSave)
+        return MeanShape.reshape((-1,2)),ImgMean,ImgStd
+    else:
+        ImageVec = (ImageVec - ImgMean) / ImgStd
+        ToSave = {'Image':ImageVec,'Landmark':LandmarkVec,'MeanShape':MeanShape,'ImgMean':ImgMean,'ImgStd':ImgStd}
+        np.savez(Name,**ToSave)
+        return MeanShape.reshape((-1,2)),ImgMean,ImgStd
 
         
-#ReadList('D:\\Dataset\\PaperTrain.txt','300W',True)
-ReadList('D:\\Dataset\\IbugList.txt','IbugTest',False)
+ms,im,imgs = ReadList('D:\\Dataset\\MenpoTrain.txt','MenpoTrain',True)
+ms,im,imgs = ReadList('D:\\Dataset\\300WTestChallenging.txt','300WTestChallenging',False,ms,im,imgs)

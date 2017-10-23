@@ -256,3 +256,6 @@ ModelManifest.xml
 /DAN/DAN/__pycache__
 *.txt
 *.npy
+*.npz
+*.xml
+/DAN/DAN/OutMy.avi
