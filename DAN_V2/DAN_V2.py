@@ -46,35 +46,31 @@ def get_filenames(data_dir):
 def get_synth_input_fn():
     return dan_run_loop.get_synth_input_fn(112, 112, 1, 68)
 
-def vgg16_input_fn(is_training,data_dir,batch_size=64,num_epochs=1,multi_gpu=False,examples_per_epoch=0):
+def vgg16_input_fn(is_training,data_dir,batch_size=64,num_epochs=1,num_parallel_calls=1, multi_gpu=False):
     img_path,pts_path = get_filenames(data_dir)
+
+    def decode_img_pts(img,pts,is_training):
+        img = cv2.imread(img.decode(), cv2.IMREAD_GRAYSCALE)
+        pts = np.loadtxt(pts.decode(),dtype=np.float32,delimiter=',')
+        return img[:,:,np.newaxis].astype(np.float32),pts
+
+    map_func=lambda img,pts,is_training:tuple(tf.py_func(decode_img_pts,[img,pts,is_training],[tf.float32,tf.float32]))
+
     img = tf.data.Dataset.from_tensor_slices(img_path)
     pts = tf.data.Dataset.from_tensor_slices(pts_path)
 
     dataset = tf.data.Dataset.zip((img, pts))
+    num_images = len(img_path)
 
-    def decode_img_pts(img,pts):
-        img = cv2.imread(img.decode(), cv2.IMREAD_GRAYSCALE).astype(np.float32)
-        pts = np.loadtxt(pts.decode(),dtype=np.float32,delimiter=',').astype(np.float32)
-        #pts = np.genfromtxt(pts.decode(), skip_header=3, skip_footer=1).astype(np.float32)
-        return img,pts
-
-    dataset = dataset.prefetch(batch_size)
-    if is_training:
-        dataset = dataset.shuffle(buffer_size=1000)
-    dataset = dataset.repeat(num_epochs)
-
-    if multi_gpu:
-        total_examples = num_epochs * examples_per_epoch
-        dataset = dataset.take(batch_size * (total_examples // batch_size))
-
-    dataset = dataset.apply(tf.contrib.data.map_and_batch(map_func=lambda i,p:tuple(tf.py_func(decode_img_pts,[i,p],[tf.float32,tf.float32])),batch_size=batch_size))
-    dataset = dataset.prefetch(1)
-
-    return dataset
+    return dan_run_loop.process_record_dataset(dataset,is_training,batch_size,
+                                               num_images,map_func,num_epochs,num_parallel_calls,
+                                               examples_per_epoch=num_images, multi_gpu=multi_gpu)
 
 def read_dataset_info(data_dir):
-    return np.random.rand(68,2).astype(np.float32),None,None
+    mean_shape = np.loadtxt(os.path.join(data_dir,'mean_shape.ptv'),dtype=np.float32,delimiter=',')
+    imgs_mean = np.loadtxt(os.path.join(data_dir,'imgs_mean.ptv'),dtype=np.float32,delimiter=',')
+    imgs_std = np.loadtxt(os.path.join(data_dir,'imgs_std.ptv'),dtype=np.float32,delimiter=',')
+    return mean_shape,imgs_mean,imgs_std
 
 def main(argv):
     parser = dan_run_loop.DANArgParser()

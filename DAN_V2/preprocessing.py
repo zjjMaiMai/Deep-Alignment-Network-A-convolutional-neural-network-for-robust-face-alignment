@@ -106,7 +106,7 @@ def _load_data(imagepath, ptspath, is_train,mirror_array):
         M[:, 2] = T
         img = cv2.warpAffine(img, M, (FLAGS.img_size, FLAGS.img_size))
 
-        if (mirror_array is not None) and random.choice((True, False)):
+        if mirror_array and random.choice((True, False)):
             pts = pts[mirror_array]
             img = cv2.flip(img, 1)
 
@@ -161,17 +161,33 @@ def _get_filenames(data_dir, listext):
 
 def main(argv):
     imagenames, ptsnames = _get_filenames(FLAGS.input_dir, ["*.jpg", "*.png"])
-    if FLAGS.mirror_file:
-        mirror_array = np.genfromtxt(FLAGS.mirror_file, dtype=int, delimiter=',')
+    mirror_array = np.genfromtxt(FLAGS.mirror_file, dtype=int, delimiter=',') if FLAGS.mirror_file else False
+    
     dataset = _input_fn(imagenames,ptsnames,FLAGS.istrain,mirror_array)
     next_element = dataset.make_one_shot_iterator().get_next()
+
+    img_list = []
+    pts_list = []
 
     with tf.Session() as sess:
         count = 0
         while True:
             try:
-                sess.run(next_element)
+                img,pts = sess.run(next_element)
+                img_list.append(img)
+                pts_list.append(pts)
             except tf.errors.OutOfRangeError:
+                img_list = np.stack(img_list)
+                pts_list = np.stack(pts_list)
+
+                mean_shape = np.mean(pts_list,axis=0)
+                imgs_mean = np.mean(img_list,axis=0)
+                imgs_std = np.std(img_list,axis=0)
+
+                np.savetxt(os.path.join(FLAGS.output_dir,'mean_shape.ptv'),mean_shape,delimiter=',')
+                np.savetxt(os.path.join(FLAGS.output_dir,'imgs_mean.ptv'),imgs_mean,delimiter=',')
+                np.savetxt(os.path.join(FLAGS.output_dir,'imgs_std.ptv'),imgs_std,delimiter=',')
+
                 print("end")
                 break
 

@@ -48,7 +48,7 @@ def process_record_dataset(dataset, is_training, batch_size, shuffle_buffer,
         total_examples = num_epochs * examples_per_epoch
         dataset = dataset.take(batch_size * (total_examples // batch_size))
 
-    dataset = dataset.map(lambda value: parse_record_fn(value, is_training),
+    dataset = dataset.map(lambda img,pts: parse_record_fn(img,pts,is_training),
                           num_parallel_calls=num_parallel_calls)
 
     dataset = dataset.batch(batch_size)
@@ -111,8 +111,18 @@ def dan_model_fn(features,
 
     # train or eval
     else:
-        loss_s1 = tf.norm(groundtruth - resultdict['s1_ret'])
-        loss_s2 = tf.norm(groundtruth - resultdict['s2_ret'])
+        def NormRmse(GroudTruth, Prediction):
+            Gt = tf.reshape(GroudTruth, [-1, 68, 2])
+            Pt = tf.reshape(Prediction, [-1, 68, 2])
+            loss = tf.reduce_mean(
+                tf.sqrt(tf.reduce_sum(tf.squared_difference(Gt, Pt), 2)), 1)
+            norm = tf.norm(tf.reduce_mean(
+                Gt[:, 36:42, :], 1) - tf.reduce_mean(Gt[:, 42:48, :], 1), axis=1)
+
+            return loss / norm
+
+        loss_s1 = tf.reduce_mean(NormRmse(groundtruth, resultdict['s1_ret']))#tf.norm(groundtruth - resultdict['s1_ret'])
+        loss_s2 = tf.reduce_mean(NormRmse(groundtruth, resultdict['s2_ret']))
 
         with tf.variable_scope('s1'):
             with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s1')):

@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>d0a95342-178a-445a-947d-c073b4013e5a</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>preprocessing.py</StartupFile>
+    <StartupFile>DAN_V2.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -12,7 +12,7 @@
     <Name>DAN_V2</Name>
     <RootNamespace>DAN_V2</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>--input_dir=D:\Dataset\300WTrain\ --output_dir=D:\Dataset\Test\ --istrain=True --repeat=10 --mirror_file=D:\Dataset\Mirror68.txt</CommandLineArguments>
+    <CommandLineArguments>-ds 1 --data_dir=D:\Dataset\Test1\</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
