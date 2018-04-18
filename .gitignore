@@ -240,22 +240,4 @@ ModelManifest.xml
 
 # FAKE - F# Make
 .fake/
-*.pkl
-/DAN/DAN/TestSomeFunction.py
-/DAN/DAN/Model/checkpoint
-/DAN/DAN/Model/Model.data-00000-of-00001
-/DAN/DAN/Model
-/DAN/DAN/1.jpg
-/DAN/DAN/timeline.json
-/DAN/DAN/module2.py
-/DAN/DAN/SeeLog.bat
-*.DESKTOP-0FB5JVH
-*.json
-/DAN/DAN/Jelo
-/DAN/DAN/Model_
-/DAN/DAN/__pycache__
-*.txt
-*.npy
-*.npz
-*.xml
-/DAN/DAN/OutMy.avi
+*.pyc
