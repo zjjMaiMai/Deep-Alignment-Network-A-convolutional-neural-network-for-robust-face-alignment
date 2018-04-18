@@ -118,6 +118,7 @@ class Model(object):
                  imgs_mean,
                  imgs_std):
         rd = {}
+        inputs_imgs = tf.reshape(inputs_imgs, [-1, self.img_size, self.img_size, 1])
 
         mean_shape = mean_shape if mean_shape is not None else tf.zeros([self.num_lmark,2],tf.float32)
         imgs_mean = imgs_mean if imgs_mean is not None else tf.zeros([self.img_size,self.img_size,1],tf.float32)

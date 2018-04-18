@@ -38,7 +38,7 @@ def get_filenames(data_dir):
 
     ptslist = []
     for image in imagelist:
-        ptslist.append(os.path.splitext(image)[0] + ".pts")
+        ptslist.append(os.path.splitext(image)[0] + ".ptv")
 
     return imagelist, ptslist
 
@@ -55,8 +55,8 @@ def vgg16_input_fn(is_training,data_dir,batch_size=64,num_epochs=1,multi_gpu=Fal
 
     def decode_img_pts(img,pts):
         img = cv2.imread(img.decode(), cv2.IMREAD_GRAYSCALE).astype(np.float32)
-        #pts = np.loadtxt(pts.decode(),dtype=np.float32,delimiter=',')
-        pts = np.genfromtxt(pts.decode(), skip_header=3, skip_footer=1).astype(np.float32)
+        pts = np.loadtxt(pts.decode(),dtype=np.float32,delimiter=',').astype(np.float32)
+        #pts = np.genfromtxt(pts.decode(), skip_header=3, skip_footer=1).astype(np.float32)
         return img,pts
 
     dataset = dataset.prefetch(batch_size)
@@ -80,6 +80,7 @@ def main(argv):
     parser = dan_run_loop.DANArgParser()
     parser.set_defaults(data_dir='./data_dir',
                         model_dir='./model_dir',
+                        data_format='channels_last',
                         train_epochs=20,
                         epochs_per_eval=2,
                         batch_size=64)

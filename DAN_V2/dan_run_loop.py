@@ -109,12 +109,10 @@ def dan_model_fn(features,
         return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
 
 
-    # train 
-    if mode == tf.estimator.ModeKeys.TRAIN:
+    # train or eval
+    else:
         loss_s1 = tf.norm(groundtruth - resultdict['s1_ret'])
         loss_s2 = tf.norm(groundtruth - resultdict['s2_ret'])
-
-
 
         with tf.variable_scope('s1'):
             with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s1')):
@@ -134,14 +132,12 @@ def dan_model_fn(features,
 
         loss = loss_s1 if stage == 1 else loss_s2
         train_op = train_op_s1 if stage == 1 else train_op_s2
-    else:
-        train_op = None
 
-    return tf.estimator.EstimatorSpec(
-        mode=mode,
-        predictions=predictions,
-        loss=loss,
-        train_op=train_op)
+        return tf.estimator.EstimatorSpec(
+            mode=mode,
+            predictions=predictions,
+            loss=loss,
+            train_op=train_op if mode == tf.estimator.ModeKeys.TRAIN else None)
 
 def dan_main(flags, model_function, input_function):
     os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
@@ -168,7 +164,7 @@ def dan_main(flags, model_function, input_function):
 
     def input_fn_not_train():
         return input_function(False, flags.data_dir, flags.batch_size,
-                                flags.epochs_per_eval, flags.num_parallel_calls,
+                                1, flags.num_parallel_calls,
                                 flags.multi_gpu)
     if flags.mode == 'predict':
         lmark = estimator.predict(input_fn=input_fn_not_train)

@@ -21,7 +21,6 @@ tf.app.flags.DEFINE_integer('img_size', 112, 'img_size')
 tf.app.flags.DEFINE_string('mirror_file', None, 'mirror_file')
 
 FLAGS = tf.app.flags.FLAGS
-MIRROR_ARRAY = None
 BATCH_SIZE = 128
 
 
@@ -79,7 +78,7 @@ def AffineImage(Img, R, T):
     M = tf.contrib.image.compose_transforms(rm, tm)
     return tf.contrib.image.transform(Img, M, "BILINEAR")
 
-def _load_data(imagepath, ptspath, is_train):
+def _load_data(imagepath, ptspath, is_train,mirror_array):
     def makerotate(angle):
         rad = angle * np.pi / 180.0
         return np.array([[np.cos(rad), np.sin(rad)], [-np.sin(rad), np.cos(rad)]], dtype=np.float32)
@@ -107,8 +106,8 @@ def _load_data(imagepath, ptspath, is_train):
         M[:, 2] = T
         img = cv2.warpAffine(img, M, (FLAGS.img_size, FLAGS.img_size))
 
-        if (MIRROR_ARRAY is not None) and random.choice((True, False)):
-            pts = pts[MIRROR_ARRAY]
+        if (mirror_array is not None) and random.choice((True, False)):
+            pts = pts[mirror_array]
             img = cv2.flip(img, 1)
 
     else:
@@ -128,12 +127,14 @@ def _load_data(imagepath, ptspath, is_train):
     _,filename = os.path.split(imagepath.decode())
     filename,_ = os.path.splitext(filename)
 
-    cv2.imwrite(os.path.join(FLAGS.output_dir,filename + '.png'),img)
-    np.savetxt(os.path.join(FLAGS.output_dir,filename + '.pts'),pts,delimiter=',')
+    uid = str(uuid.uuid1())
 
-    return img,pts
+    cv2.imwrite(os.path.join(FLAGS.output_dir,filename + '@' + uid + '.png'),img)
+    np.savetxt(os.path.join(FLAGS.output_dir,filename + '@' + uid + '.ptv'),pts,delimiter=',')
 
-def _input_fn(img, pts, is_train):
+    return img,pts.astype(np.float32)
+
+def _input_fn(img, pts, is_train,mirror_array):
     dataset_image = tf.data.Dataset.from_tensor_slices(img)
     dataset_pts = tf.data.Dataset.from_tensor_slices(pts)
     dataset = tf.data.Dataset.zip((dataset_image, dataset_pts))
@@ -141,7 +142,7 @@ def _input_fn(img, pts, is_train):
     dataset = dataset.prefetch(BATCH_SIZE)
     dataset = dataset.repeat(FLAGS.repeat)
     dataset = dataset.map(lambda imagepath, ptspath: tuple(tf.py_func(_load_data, [
-                          imagepath, ptspath, is_train], [tf.string])), num_parallel_calls=8)                     
+                          imagepath, ptspath, is_train,mirror_array], [tf.uint8,tf.float32])), num_parallel_calls=8)                     
     dataset = dataset.prefetch(1)
 
     return dataset
@@ -160,7 +161,9 @@ def _get_filenames(data_dir, listext):
 
 def main(argv):
     imagenames, ptsnames = _get_filenames(FLAGS.input_dir, ["*.jpg", "*.png"])
-    dataset = _input_fn(imagenames,ptsnames,FLAGS.istrain)
+    if FLAGS.mirror_file:
+        mirror_array = np.genfromtxt(FLAGS.mirror_file, dtype=int, delimiter=',')
+    dataset = _input_fn(imagenames,ptsnames,FLAGS.istrain,mirror_array)
     next_element = dataset.make_one_shot_iterator().get_next()
 
     with tf.Session() as sess:
