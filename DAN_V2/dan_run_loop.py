@@ -165,29 +165,42 @@ def dan_main(flags, model_function, input_function):
                 'batch_size': flags.batch_size,
                 'multi_gpu': flags.multi_gpu,
             })
-    for _ in range(flags.train_epochs // flags.epochs_per_eval):
-        train_hooks = hooks_helper.get_train_hooks(["LoggingTensorHook"], batch_size=flags.batch_size)
 
-        print('Starting a training cycle.')
+    def input_fn_not_train():
+        return input_function(False, flags.data_dir, flags.batch_size,
+                                flags.epochs_per_eval, flags.num_parallel_calls,
+                                flags.multi_gpu)
+    if flags.mode == 'predict':
+        lmark = estimator.predict(input_fn=input_fn_not_train)
+        print(lmark)
+    elif flags.mode == 'eval':
+        lmark = estimator.evaluate(input_fn=input_fn_not_train)
+        print(lmark)
+    else:
+        for _ in range(flags.train_epochs // flags.epochs_per_eval):
+            train_hooks = hooks_helper.get_train_hooks(["LoggingTensorHook"], batch_size=flags.batch_size)
 
-        def input_fn_train():
-            return input_function(True, flags.data_dir, flags.batch_size,
-                                  flags.epochs_per_eval, flags.num_parallel_calls,
-                                  flags.multi_gpu)
+            print('Starting a training cycle.')
 
-        estimator.train(input_fn=input_fn_train,
-                        #hooks=train_hooks,
-                        max_steps=flags.max_train_steps)
+            def input_fn_train():
+                return input_function(True, flags.data_dir, flags.batch_size,
+                                      flags.epochs_per_eval, flags.num_parallel_calls,
+                                      flags.multi_gpu)
 
-        print('Starting to evaluate.')
-        def input_fn_eval():
-            return input_function(False, flags.data_dir, flags.batch_size,
-                                  1, flags.num_parallel_calls, flags.multi_gpu)
+            estimator.train(input_fn=input_fn_train,
+                            #hooks=train_hooks,
+                            max_steps=flags.max_train_steps)
 
-        eval_results = estimator.evaluate(input_fn=input_fn_eval,
-                                          steps=flags.max_train_steps)
+            print('Starting to evaluate.')
+            def input_fn_eval():
+                return input_function(False, flags.data_dir, flags.batch_size,
+                                      1, flags.num_parallel_calls, flags.multi_gpu)
 
-        print(eval_results)
+            eval_results = estimator.evaluate(input_fn=input_fn_eval,
+                                              steps=flags.max_train_steps)
+
+            print(eval_results)
+    
 
 class DANArgParser(argparse.ArgumentParser):
   """Arguments for configuring and running a Resnet Model.
