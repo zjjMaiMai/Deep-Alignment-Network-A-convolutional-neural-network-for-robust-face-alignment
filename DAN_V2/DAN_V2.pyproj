@@ -12,7 +12,7 @@
     <Name>DAN_V2</Name>
     <RootNamespace>DAN_V2</RootNamespace>
     <LaunchProvider>Standard Python launcher</LaunchProvider>
-    <CommandLineArguments>-ds 1 --data_dir=D:\Dataset\Test1\</CommandLineArguments>
+    <CommandLineArguments>-ds 2 --data_dir=D:\Dataset\Test1\</CommandLineArguments>
     <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
@@ -32,9 +32,6 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="preprocessing.py" />
-    <Compile Include="test.py">
-      <SubType>Code</SubType>
-    </Compile>
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in

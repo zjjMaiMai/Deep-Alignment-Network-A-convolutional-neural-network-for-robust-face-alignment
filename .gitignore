@@ -242,3 +242,4 @@ ModelManifest.xml
 .fake/
 *.pyc
 /DAN_V2/ModelDir
+/DAN_V2/model_dir
