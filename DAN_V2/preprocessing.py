@@ -106,7 +106,8 @@ def _load_data(imagepath, ptspath, is_train,mirror_array):
         M[:, 2] = T
         img = cv2.warpAffine(img, M, (FLAGS.img_size, FLAGS.img_size))
 
-        if mirror_array and random.choice((True, False)):
+        if any(mirror_array) and random.choice((True, False)):
+            pts[:,0] = FLAGS.img_size - 1 - pts[:,0]
             pts = pts[mirror_array]
             img = cv2.flip(img, 1)
 
@@ -161,7 +162,7 @@ def _get_filenames(data_dir, listext):
 
 def main(argv):
     imagenames, ptsnames = _get_filenames(FLAGS.input_dir, ["*.jpg", "*.png"])
-    mirror_array = np.genfromtxt(FLAGS.mirror_file, dtype=int, delimiter=',') if FLAGS.mirror_file else False
+    mirror_array = np.genfromtxt(FLAGS.mirror_file, dtype=int, delimiter=',') if FLAGS.mirror_file else np.zeros(1)
     
     dataset = _input_fn(imagenames,ptsnames,FLAGS.istrain,mirror_array)
     next_element = dataset.make_one_shot_iterator().get_next()

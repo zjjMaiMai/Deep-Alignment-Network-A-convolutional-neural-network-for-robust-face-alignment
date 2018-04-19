@@ -52,7 +52,7 @@ def vgg16_input_fn(is_training,data_dir,batch_size=64,num_epochs=1,num_parallel_
     def decode_img_pts(img,pts,is_training):
         img = cv2.imread(img.decode(), cv2.IMREAD_GRAYSCALE)
         pts = np.loadtxt(pts.decode(),dtype=np.float32,delimiter=',')
-        return img[:,:,np.newaxis].astype(np.float32),pts
+        return img[:,:,np.newaxis].astype(np.float32),pts.astype(np.float32)
 
     map_func=lambda img,pts,is_training:tuple(tf.py_func(decode_img_pts,[img,pts,is_training],[tf.float32,tf.float32]))
 
@@ -70,7 +70,7 @@ def read_dataset_info(data_dir):
     mean_shape = np.loadtxt(os.path.join(data_dir,'mean_shape.ptv'),dtype=np.float32,delimiter=',')
     imgs_mean = np.loadtxt(os.path.join(data_dir,'imgs_mean.ptv'),dtype=np.float32,delimiter=',')
     imgs_std = np.loadtxt(os.path.join(data_dir,'imgs_std.ptv'),dtype=np.float32,delimiter=',')
-    return mean_shape,imgs_mean,imgs_std
+    return mean_shape.astype(np.float32) ,imgs_mean.astype(np.float32),imgs_std.astype(np.float32)
 
 def main(argv):
     parser = dan_run_loop.DANArgParser()
@@ -78,7 +78,7 @@ def main(argv):
                         model_dir='./model_dir',
                         data_format='channels_last',
                         train_epochs=20,
-                        epochs_per_eval=2,
+                        epochs_per_eval=10,
                         batch_size=64)
 
     flags = parser.parse_args(args=argv[1:])

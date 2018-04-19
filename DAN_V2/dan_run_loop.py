@@ -42,7 +42,7 @@ def process_record_dataset(dataset, is_training, batch_size, shuffle_buffer,
     dataset = dataset.prefetch(buffer_size=batch_size)
     if is_training:
         dataset = dataset.shuffle(buffer_size=shuffle_buffer)
-    dataset.repeat(num_epochs)
+    dataset = dataset.repeat(num_epochs)
 
     if multi_gpu:
         total_examples = num_epochs * examples_per_epoch
@@ -121,24 +121,22 @@ def dan_model_fn(features,
 
             return loss / norm
 
-        loss_s1 = tf.reduce_mean(NormRmse(groundtruth, resultdict['s1_ret']))#tf.norm(groundtruth - resultdict['s1_ret'])
-        loss_s2 = tf.reduce_mean(NormRmse(groundtruth, resultdict['s2_ret']))
+        loss_s1 = tf.reduce_mean(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.squared_difference(groundtruth,resultdict['s1_ret']),-1)),-1) / tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.reduce_max(groundtruth,1),tf.reduce_min(groundtruth,1)),-1)))
+        loss_s2 = tf.reduce_mean(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.squared_difference(groundtruth,resultdict['s2_ret']),-1)),-1) / tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.reduce_max(groundtruth,1),tf.reduce_min(groundtruth,1)),-1)))
 
-        with tf.variable_scope('s1'):
-            with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s1')):
-                optimizer_s1 = tf.train.AdamOptimizer(0.001)
-                if multi_gpu:
-                    optimizer_s1 = tf.contrib.estimator.TowerOptimizer(optimizer_s1)
-                train_op_s1 = optimizer_s1.minimize(loss_s1,global_step=tf.train.get_or_create_global_step(),
-                                                    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 's1'))
+        with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s1')):
+            optimizer_s1 = tf.train.AdamOptimizer(0.001)
+            if multi_gpu:
+                optimizer_s1 = tf.contrib.estimator.TowerOptimizer(optimizer_s1)
+            train_op_s1 = optimizer_s1.minimize(loss_s1,global_step=tf.train.get_or_create_global_step(),
+                                                var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 's1'))
 
-        with tf.variable_scope('s2'):
-            with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s2')):
-                optimizer_s2 = tf.train.AdamOptimizer(0.001)
-                if multi_gpu:
-                    optimizer_s2 = tf.contrib.estimator.TowerOptimizer(optimizer_s2)
-                train_op_s2 = optimizer_s2.minimize(loss_s2,global_step=tf.train.get_or_create_global_step(),
-                                                    var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 's2'))
+        with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s2')):
+            optimizer_s2 = tf.train.AdamOptimizer(0.001)
+            if multi_gpu:
+                optimizer_s2 = tf.contrib.estimator.TowerOptimizer(optimizer_s2)
+            train_op_s2 = optimizer_s2.minimize(loss_s2,global_step=tf.train.get_or_create_global_step(),
+                                                var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 's2'))
 
         loss = loss_s1 if stage == 1 else loss_s2
         train_op = train_op_s1 if stage == 1 else train_op_s2
