@@ -120,9 +120,9 @@ class Model(object):
         rd = {}
         inputs_imgs = tf.reshape(inputs_imgs, [-1, self.img_size, self.img_size, 1])
 
-        mean_shape = mean_shape if mean_shape is not None else tf.zeros([self.num_lmark,2],tf.float32)
-        imgs_mean = imgs_mean if imgs_mean is not None else tf.zeros([self.img_size,self.img_size,1],tf.float32)
-        imgs_std = imgs_std if imgs_std is not None else tf.ones([self.img_size,self.img_size,1],tf.float32)
+        mean_shape = tf.reshape(mean_shape,[self.num_lmark,2]) if mean_shape is not None else tf.zeros([self.num_lmark,2],tf.float32)
+        imgs_mean = tf.reshape(imgs_mean,[self.img_size,self.img_size,1]) if imgs_mean is not None else tf.zeros([self.img_size,self.img_size,1],tf.float32)
+        imgs_std = tf.reshape(imgs_std,[self.img_size,self.img_size,1]) if imgs_std is not None else tf.ones([self.img_size,self.img_size,1],tf.float32)
 
         imgs_mean_tensor = tf.get_variable('imgs_mean',trainable=False,initializer=imgs_mean)
         imgs_std_tensor = tf.get_variable('imgs_std',trainable=False,initializer=imgs_std)

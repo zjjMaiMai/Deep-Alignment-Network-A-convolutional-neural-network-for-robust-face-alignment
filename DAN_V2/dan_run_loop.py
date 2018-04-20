@@ -99,53 +99,48 @@ def dan_model_fn(features,
                        stage==2 and mode==tf.estimator.ModeKeys.TRAIN,
                        mean_shape,imgs_mean,imgs_std)
 
-    predictions = {
-            'landmark_s1':resultdict['s1_ret'],
-            'landmark_s2':resultdict['s2_ret'],
-        }
 
-    # predict
-    if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+    loss_s1 = tf.reduce_mean(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.squared_difference(groundtruth,resultdict['s1_ret']),-1)),-1) / tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.reduce_max(groundtruth,1),tf.reduce_min(groundtruth,1)),-1)))
+    loss_s2 = tf.reduce_mean(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.squared_difference(groundtruth,resultdict['s2_ret']),-1)),-1) / tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.reduce_max(groundtruth,1),tf.reduce_min(groundtruth,1)),-1)))
 
+    with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s1')):
+        optimizer_s1 = tf.train.AdamOptimizer(0.001)
+        if multi_gpu:
+            optimizer_s1 = tf.contrib.estimator.TowerOptimizer(optimizer_s1)
+        train_op_s1 = optimizer_s1.minimize(loss_s1,global_step=tf.train.get_or_create_global_step(),
+                                            var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 's1'))
 
-    # train or eval
+    with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s2')):
+        optimizer_s2 = tf.train.AdamOptimizer(0.001)
+        if multi_gpu:
+            optimizer_s2 = tf.contrib.estimator.TowerOptimizer(optimizer_s2)
+        train_op_s2 = optimizer_s2.minimize(loss_s2,global_step=tf.train.get_or_create_global_step(),
+                                            var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 's2'))
+
+    loss = loss_s1 if stage == 1 else loss_s2
+    train_op = train_op_s1 if stage == 1 else train_op_s2
+
+    if (mode == tf.estimator.ModeKeys.TRAIN or
+        mode == tf.estimator.ModeKeys.EVAL):
+            loss = loss_s1 if stage == 1 else loss_s2
     else:
-        def NormRmse(GroudTruth, Prediction):
-            Gt = tf.reshape(GroudTruth, [-1, 68, 2])
-            Pt = tf.reshape(Prediction, [-1, 68, 2])
-            loss = tf.reduce_mean(
-                tf.sqrt(tf.reduce_sum(tf.squared_difference(Gt, Pt), 2)), 1)
-            norm = tf.norm(tf.reduce_mean(
-                Gt[:, 36:42, :], 1) - tf.reduce_mean(Gt[:, 42:48, :], 1), axis=1)
+        loss = None
 
-            return loss / norm
-
-        loss_s1 = tf.reduce_mean(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.squared_difference(groundtruth,resultdict['s1_ret']),-1)),-1) / tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.reduce_max(groundtruth,1),tf.reduce_min(groundtruth,1)),-1)))
-        loss_s2 = tf.reduce_mean(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.squared_difference(groundtruth,resultdict['s2_ret']),-1)),-1) / tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.reduce_max(groundtruth,1),tf.reduce_min(groundtruth,1)),-1)))
-
-        with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s1')):
-            optimizer_s1 = tf.train.AdamOptimizer(0.001)
-            if multi_gpu:
-                optimizer_s1 = tf.contrib.estimator.TowerOptimizer(optimizer_s1)
-            train_op_s1 = optimizer_s1.minimize(loss_s1,global_step=tf.train.get_or_create_global_step(),
-                                                var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 's1'))
-
-        with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS,'s2')):
-            optimizer_s2 = tf.train.AdamOptimizer(0.001)
-            if multi_gpu:
-                optimizer_s2 = tf.contrib.estimator.TowerOptimizer(optimizer_s2)
-            train_op_s2 = optimizer_s2.minimize(loss_s2,global_step=tf.train.get_or_create_global_step(),
-                                                var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 's2'))
-
-        loss = loss_s1 if stage == 1 else loss_s2
+    if mode == tf.estimator.ModeKeys.TRAIN:
         train_op = train_op_s1 if stage == 1 else train_op_s2
+    else:
+        train_op = None
 
-        return tf.estimator.EstimatorSpec(
-            mode=mode,
-            predictions=predictions,
-            loss=loss,
-            train_op=train_op if mode == tf.estimator.ModeKeys.TRAIN else None)
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        predictions = resultdict
+    else:
+        predictions = None
+
+    return tf.estimator.EstimatorSpec(
+        mode=mode,
+        predictions=predictions,
+        loss=loss,
+        train_op=train_op)
 
 def dan_main(flags, model_function, input_function):
     os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
@@ -170,40 +165,28 @@ def dan_main(flags, model_function, input_function):
                 'multi_gpu': flags.multi_gpu,
             })
 
-    def input_fn_not_train():
-        return input_function(False, flags.data_dir, flags.batch_size,
-                                1, flags.num_parallel_calls,
-                                flags.multi_gpu)
-    if flags.mode == 'predict':
-        lmark = estimator.predict(input_fn=input_fn_not_train)
-        print(lmark)
-    elif flags.mode == 'eval':
-        lmark = estimator.evaluate(input_fn=input_fn_not_train)
-        print(lmark)
-    else:
-        for _ in range(flags.train_epochs // flags.epochs_per_eval):
-            train_hooks = hooks_helper.get_train_hooks(["LoggingTensorHook"], batch_size=flags.batch_size)
+    for _ in range(flags.train_epochs // flags.epochs_per_eval):
+        train_hooks = hooks_helper.get_train_hooks(["LoggingTensorHook"], batch_size=flags.batch_size)
 
-            print('Starting a training cycle.')
+        print('Starting a training cycle.')
 
-            def input_fn_train():
-                return input_function(True, flags.data_dir, flags.batch_size,
-                                      flags.epochs_per_eval, flags.num_parallel_calls,
-                                      flags.multi_gpu)
+        def input_fn_train():
+            return input_function(True, flags.data_dir, flags.batch_size,
+                                    flags.epochs_per_eval, flags.num_parallel_calls,
+                                    flags.multi_gpu)
 
-            estimator.train(input_fn=input_fn_train,
-                            #hooks=train_hooks,
-                            max_steps=flags.max_train_steps)
+        estimator.train(input_fn=input_fn_train,
+                        max_steps=flags.max_train_steps)
 
-            print('Starting to evaluate.')
-            def input_fn_eval():
-                return input_function(False, flags.data_dir, flags.batch_size,
-                                      1, flags.num_parallel_calls, flags.multi_gpu)
+        print('Starting to evaluate.')
+        def input_fn_eval():
+            return input_function(False, flags.data_dir, flags.batch_size,
+                                    1, flags.num_parallel_calls, flags.multi_gpu)
 
-            eval_results = estimator.evaluate(input_fn=input_fn_eval,
-                                              steps=flags.max_train_steps)
+        eval_results = estimator.evaluate(input_fn=input_fn_eval,
+                                            steps=flags.max_train_steps)
 
-            print(eval_results)
+        print(eval_results)
     
 
 class DANArgParser(argparse.ArgumentParser):

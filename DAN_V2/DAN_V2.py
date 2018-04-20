@@ -87,7 +87,15 @@ def main(argv):
     imgs_mean = None
     imgs_std = None
 
-    if flags.mode == 'train':
+    flags_trans = { 
+        'train':tf.estimator.ModeKeys.TRAIN,
+        'eval':tf.estimator.ModeKeys.EVAL,
+        'predict':tf.estimator.ModeKeys.PREDICT
+                  }
+
+    flags.mode = flags_trans[flags.mode]
+
+    if flags.mode == tf.estimator.ModeKeys.TRAIN:
         mean_shape,imgs_mean,imgs_std = read_dataset_info(flags.data_dir)
 
     def vgg16_model_fn(features, labels, mode, params):
