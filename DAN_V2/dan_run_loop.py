@@ -91,6 +91,10 @@ def dan_model_fn(features,
                  imgs_mean,
                  imgs_std,
                  data_format, multi_gpu=False):
+
+    if isinstance(features, dict):
+        features = features['image']
+
     tf.summary.image('images', features, max_outputs=6)
 
     model = model_class(num_lmark,data_format)
@@ -99,6 +103,11 @@ def dan_model_fn(features,
                        stage==2 and mode==tf.estimator.ModeKeys.TRAIN,
                        mean_shape,imgs_mean,imgs_std)
 
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(
+        mode=mode,
+        predictions=resultdict
+        )
 
     loss_s1 = tf.reduce_mean(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.squared_difference(groundtruth,resultdict['s1_ret']),-1)),-1) / tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.reduce_max(groundtruth,1),tf.reduce_min(groundtruth,1)),-1)))
     loss_s2 = tf.reduce_mean(tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.squared_difference(groundtruth,resultdict['s2_ret']),-1)),-1) / tf.sqrt(tf.reduce_sum(tf.squared_difference(tf.reduce_max(groundtruth,1),tf.reduce_min(groundtruth,1)),-1)))
@@ -131,16 +140,13 @@ def dan_model_fn(features,
     else:
         train_op = None
 
-    if mode == tf.estimator.ModeKeys.PREDICT:
-        predictions = resultdict
-    else:
-        predictions = None
 
     return tf.estimator.EstimatorSpec(
         mode=mode,
-        predictions=predictions,
+        predictions=resultdict,
         loss=loss,
-        train_op=train_op)
+        train_op=train_op
+        )
 
 def dan_main(flags, model_function, input_function):
     os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
@@ -165,28 +171,45 @@ def dan_main(flags, model_function, input_function):
                 'multi_gpu': flags.multi_gpu,
             })
 
-    for _ in range(flags.train_epochs // flags.epochs_per_eval):
-        train_hooks = hooks_helper.get_train_hooks(["LoggingTensorHook"], batch_size=flags.batch_size)
+    if flags.mode == tf.estimator.ModeKeys.PREDICT:
+        import cv2
+        predict_results = estimator.predict(input_function)
+        for x in predict_results:
+            landmark = x['s2_ret']
+            img = x['img']
 
-        print('Starting a training cycle.')
+            cv2.imshow('t',img)
+            cv2.waitKey(30)
+        return
 
-        def input_fn_train():
-            return input_function(True, flags.data_dir, flags.batch_size,
-                                    flags.epochs_per_eval, flags.num_parallel_calls,
-                                    flags.multi_gpu)
 
-        estimator.train(input_fn=input_fn_train,
-                        max_steps=flags.max_train_steps)
+    def input_fn_eval():
+        return input_function(False, flags.data_dir, flags.batch_size,
+                              1, flags.num_parallel_calls, flags.multi_gpu)
 
-        print('Starting to evaluate.')
-        def input_fn_eval():
-            return input_function(False, flags.data_dir, flags.batch_size,
-                                    1, flags.num_parallel_calls, flags.multi_gpu)
+    def input_fn_train():
+        return input_function(True, flags.data_dir, flags.batch_size,
+                              flags.epochs_per_eval, flags.num_parallel_calls,
+                              flags.multi_gpu)
 
-        eval_results = estimator.evaluate(input_fn=input_fn_eval,
-                                            steps=flags.max_train_steps)
-
+    if flags.mode == tf.estimator.ModeKeys.EVAL:
+        eval_results = estimator.evaluate(input_fn=input_fn_eval,steps=flags.max_train_steps)
         print(eval_results)
+
+    if flags.mode == tf.estimator.ModeKeys.TRAIN:
+        for _ in range(flags.train_epochs // flags.epochs_per_eval):
+            train_hooks = hooks_helper.get_train_hooks(["LoggingTensorHook"], batch_size=flags.batch_size)
+
+            print('Starting a training cycle.')
+            estimator.train(input_fn=input_fn_train,
+                            max_steps=flags.max_train_steps)
+
+            print('Starting to evaluate.')
+            eval_results = estimator.evaluate(input_fn=input_fn_eval,
+                                                steps=flags.max_train_steps)
+            print(eval_results)
+            
+
     
 
 class DANArgParser(argparse.ArgumentParser):

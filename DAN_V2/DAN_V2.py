@@ -72,6 +72,25 @@ def read_dataset_info(data_dir):
     imgs_std = np.loadtxt(os.path.join(data_dir,'imgs_std.ptv'),dtype=np.float32,delimiter=',')
     return mean_shape.astype(np.float32) ,imgs_mean.astype(np.float32),imgs_std.astype(np.float32)
 
+def video_input_fn(data_dir,img_size,num_lmark):
+    video = cv2.VideoCapture(data_dir)
+
+    def _get_frame():
+        while True:
+            _,frame = video.read()
+            if len(frame.shape) == 3:
+                frame = cv2.cvtColor(frame,cv2.COLOR_BGR2GRAY)
+            frame = cv2.resize(frame,(img_size,img_size)).astype(np.float32)
+            yield (frame,np.zeros([num_lmark,2],np.float32))
+
+    def input_fn():
+        dataset = tf.data.Dataset.from_generator(_get_frame,(tf.float32,tf.float32),(tf.TensorShape([img_size,img_size]),tf.TensorShape([num_lmark,2])))
+        return dataset
+
+    return input_fn
+
+
+
 def main(argv):
     parser = dan_run_loop.DANArgParser()
     parser.set_defaults(data_dir='./data_dir',
@@ -112,6 +131,9 @@ def main(argv):
                             multi_gpu=params['multi_gpu'])
 
     input_function = flags.use_synthetic_data and get_synth_input_fn() or vgg16_input_fn
+
+    if flags.mode == tf.estimator.ModeKeys.PREDICT:
+        input_function = video_input_fn(flags.data_dir,112,flags.num_lmark)
     dan_run_loop.dan_main(flags,vgg16_model_fn,input_function)
 
 if __name__ == '__main__':

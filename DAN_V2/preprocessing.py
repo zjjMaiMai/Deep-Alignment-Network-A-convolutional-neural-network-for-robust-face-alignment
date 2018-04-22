@@ -23,27 +23,6 @@ tf.app.flags.DEFINE_string('mirror_file', None, 'mirror_file')
 FLAGS = tf.app.flags.FLAGS
 BATCH_SIZE = 128
 
-
-def GetAffineParam(From, To):
-    FromMean = tf.reduce_mean(From, axis=1, keepdims=True)
-    ToMean = tf.reduce_mean(To, axis=1, keepdims=True)
-
-    FromCentralized = From - FromMean
-    ToCentralized = To - ToMean
-
-    DotResult = tf.reduce_sum(tf.multiply(
-        FromCentralized, ToCentralized), axis=[1, 2])
-    NormPow2 = tf.pow(tf.norm(FromCentralized, axis=[1, 2]), 2)
-
-    a = DotResult / NormPow2
-    b = tf.reduce_sum(tf.multiply(FromCentralized[:, :, 0], ToCentralized[:, :, 1]) - tf.multiply(
-        FromCentralized[:, :, 1], ToCentralized[:, :, 0]), 1) / NormPow2
-
-    R = tf.reshape(tf.stack([a, b, -b, a], axis=1), [-1, 2, 2])
-    T = ToMean - tf.matmul(FromMean, R)
-
-    return R, T
-
 def getAffine(From, To):
     FromMean = np.mean(From, axis=0)
     ToMean = np.mean(To, axis=0)
@@ -65,18 +44,6 @@ def getAffine(From, To):
 
     return R, T
 
-def AffineImage(Img, R, T):
-    R = tf.matrix_inverse(R)
-    R = tf.matrix_transpose(R)
-
-    rm = tf.reshape(
-        tf.pad(R, [[0, 0], [0, 0], [0, 1]], mode='CONSTANT'), [-1, 6])
-    rm = tf.pad(rm, [[0, 0], [0, 2]], mode='CONSTANT')
-
-    tm = tf.contrib.image.translations_to_projective_transforms(
-        tf.reshape(T, [-1, 2]))
-    M = tf.contrib.image.compose_transforms(rm, tm)
-    return tf.contrib.image.transform(Img, M, "BILINEAR")
 
 def _load_data(imagepath, ptspath, is_train,mirror_array):
     def makerotate(angle):

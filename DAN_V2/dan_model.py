@@ -120,6 +120,8 @@ class Model(object):
         rd = {}
         inputs_imgs = tf.reshape(inputs_imgs, [-1, self.img_size, self.img_size, 1])
 
+        rd['img'] = inputs_imgs
+
         mean_shape = tf.reshape(mean_shape,[self.num_lmark,2]) if mean_shape is not None else tf.zeros([self.num_lmark,2],tf.float32)
         imgs_mean = tf.reshape(imgs_mean,[self.img_size,self.img_size,1]) if imgs_mean is not None else tf.zeros([self.img_size,self.img_size,1],tf.float32)
         imgs_std = tf.reshape(imgs_std,[self.img_size,self.img_size,1]) if imgs_std is not None else tf.ones([self.img_size,self.img_size,1],tf.float32)
@@ -148,7 +150,7 @@ class Model(object):
 
             s1_fc1 = fc_layer(inputs,256,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer(),
                               use_batch_norm=True,training=s1_training,data_format=self.data_format)
-            rd['s1_ret'] = tf.reshape(fc_layer(s1_fc1,self.num_lmark * 2),[-1,self.num_lmark,2]) + shape_mean_tensor
+            rd['s1_ret'] = tf.identity(tf.reshape(fc_layer(s1_fc1,self.num_lmark * 2),[-1,self.num_lmark,2]) + shape_mean_tensor,name='output_landmark')
         
         with tf.variable_scope('s2'):
             r,t = self.__calc_affine_params(rd['s1_ret'],shape_mean_tensor)
@@ -179,6 +181,6 @@ class Model(object):
             s2_fc1 = fc_layer(inputs,256,activation=tf.nn.relu,kernel_initializer=tf.glorot_uniform_initializer(),
                               use_batch_norm=True,training=s2_training,data_format=self.data_format)
             s2_fc2 = tf.reshape(fc_layer(s2_fc1,self.num_lmark * 2),[-1,self.num_lmark,2]) + s2_lmark
-            rd['s2_ret'] = self.__affine_shape(s2_fc2,r,t,isinv=True)
+            rd['s2_ret'] = tf.identity(self.__affine_shape(s2_fc2,r,t,isinv=True),name='output_landmark')
 
         return rd
