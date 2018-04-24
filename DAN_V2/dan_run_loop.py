@@ -184,7 +184,7 @@ def dan_main(flags, model_function, input_function):
 
 
     def input_fn_eval():
-        return input_function(False, flags.data_dir, flags.batch_size,
+        return input_function(False, flags.data_dir if flags.data_dir_test is not None else flags.data_dir_test, flags.batch_size,
                               1, flags.num_parallel_calls, flags.multi_gpu)
 
     def input_fn_train():
@@ -222,6 +222,12 @@ class DANArgParser(argparse.ArgumentParser):
         parsers.PerformanceParser(),
         parsers.ImageModelParser(),
     ])
+
+    self.add_argument(
+        "--data_dir_test", "-ddt", default=None,
+        help="[default: %(default)s] The location of the test data.",
+        metavar="<DD>",
+    )
 
     self.add_argument(
         '--dan_stage', '-ds', type=int, default=1,
