@@ -259,3 +259,4 @@ ModelManifest.xml
 *.npz
 *.xml
 /DAN/DAN/OutMy.avi
+*.pyc
