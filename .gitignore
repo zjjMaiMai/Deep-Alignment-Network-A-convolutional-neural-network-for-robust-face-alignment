@@ -240,6 +240,7 @@ ModelManifest.xml
 
 # FAKE - F# Make
 .fake/
+<<<<<<< HEAD
 *.pkl
 /DAN/DAN/TestSomeFunction.py
 /DAN/DAN/Model/checkpoint
@@ -260,3 +261,8 @@ ModelManifest.xml
 *.xml
 /DAN/DAN/OutMy.avi
 *.pyc
+=======
+*.pyc
+/DAN_V2/ModelDir
+/DAN_V2/model_dir
+>>>>>>> v2

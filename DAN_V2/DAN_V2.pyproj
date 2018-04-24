@@ -1,17 +1,19 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <SchemaVersion>2.0</SchemaVersion>
-    <ProjectGuid>6e9f60f2-2fa0-4baf-8036-2fc140fbd090</ProjectGuid>
+    <ProjectGuid>d0a95342-178a-445a-947d-c073b4013e5a</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>DAN.py</StartupFile>
+    <StartupFile>DAN_V2.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
     <OutputPath>.</OutputPath>
-    <Name>DAN</Name>
-    <RootNamespace>DAN</RootNamespace>
+    <Name>DAN_V2</Name>
+    <RootNamespace>DAN_V2</RootNamespace>
+    <LaunchProvider>Standard Python launcher</LaunchProvider>
+    <CommandLineArguments>-ds 2 --data_dir=D:\Dataset\Test1\</CommandLineArguments>
+    <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -22,17 +24,16 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="DAN.py" />
-    <Compile Include="DataSetPre.py">
+    <Compile Include="dan_run_loop.py">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="DAN_V2.py" />
+    <Compile Include="dan_model.py">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="preprocessing.py" />
   </ItemGroup>
-  <PropertyGroup>
-    <VisualStudioVersion Condition="'$(VisualStudioVersion)' == ''">10.0</VisualStudioVersion>
-    <PtvsTargetsFile>$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets</PtvsTargetsFile>
-  </PropertyGroup>
-  <Import Condition="Exists($(PtvsTargetsFile))" Project="$(PtvsTargetsFile)" />
-  <Import Condition="!Exists($(PtvsTargetsFile))" Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
        Visual Studio and specify your pre- and post-build commands in
        the BeforeBuild and AfterBuild targets below. -->
