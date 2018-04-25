@@ -96,8 +96,8 @@ class Model(object):
     def __gen_heatmap(self,shapes):
         shapes = shapes[:,:,tf.newaxis,tf.newaxis,:]
         value = self.__pixels__ - shapes
-        value = tf.reciprocal(tf.norm(value,axis=-1))
-        value = tf.reduce_max(value,axis=1)
+        value = tf.norm(value,axis=-1)
+        value = 1.0 / (tf.reduce_min(value,axis=1) + 1.0)
         value = tf.expand_dims(value,axis=-1)
         return value
 
