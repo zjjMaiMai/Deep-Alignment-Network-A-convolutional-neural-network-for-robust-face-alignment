@@ -8,7 +8,6 @@ import tensorflow as tf
 _BATCH_NORM_DECAY = 0.997
 _BATCH_NORM_EPSILON = 1e-5
 DEFAULT_VERSION = 2
-GLOROTUNIFORM_SCALE = 2**0.5
 
 def batch_norm(inputs,training,data_format):
   """Performs a batch normalization using a standard set of parameters."""
@@ -22,7 +21,7 @@ def vgg_block(inputs,filters,num_convs,training,kernel_size,maxpool,data_format)
     for i in range(num_convs):
         inputs = batch_norm(tf.layers.conv2d(inputs,filters,kernel_size,1,
                                              padding='same',activation=tf.nn.relu,
-                                             kernel_initializer=tf.variance_scaling_initializer(scale=GLOROTUNIFORM_SCALE),
+                                             kernel_initializer=tf.variance_scaling_initializer(),
                                              data_format=data_format),training=training,data_format=data_format)
     if maxpool:
         inputs = tf.layers.max_pooling2d(inputs,2,2,padding='same')
@@ -58,9 +57,9 @@ class Model(object):
         self.kernel_size = kernel_size
         self.img_size = img_size
 
-        self.__pixels__ = tf.constant([(x, y) for x in range(self.img_size) for y in range(self.img_size)],
+        self.__pixels__ = tf.constant([(x, y) for y in range(self.img_size) for x in range(self.img_size)],
                                       dtype=tf.float32,shape=[1,self.img_size,self.img_size,2])
-        self.__pixels__ = tf.tile(self.__pixels__,[num_lmark,1,1,1])
+        #self.__pixels__ = tf.tile(self.__pixels__,[num_lmark,1,1,1])
 
     def __calc_affine_params(self,from_shape,to_shape):
         from_shape = tf.reshape(from_shape,[-1,self.num_lmark,2])
@@ -120,6 +119,7 @@ class Model(object):
                  imgs_std):
         rd = {}
         inputs_imgs = tf.reshape(inputs_imgs, [-1, self.img_size, self.img_size, 1])
+        tf.summary.image('image', inputs_imgs, max_outputs=6)
 
         rd['img'] = inputs_imgs
 
@@ -138,6 +138,7 @@ class Model(object):
         # https://www.tensorflow.org/performance/performance_guide#data_formats
         with tf.variable_scope('s1'):
             inputs = inputs_imgs
+
             if self.data_format == 'channels_first':
                 inputs = tf.transpose(inputs, [0, 3, 1, 2])
 
@@ -149,7 +150,7 @@ class Model(object):
             inputs = tf.contrib.layers.flatten(inputs)
             inputs = tf.layers.dropout(inputs,0.5,training=s1_training)
 
-            s1_fc1 = fc_layer(inputs,256,activation=tf.nn.relu,kernel_initializer=tf.variance_scaling_initializer(scale=GLOROTUNIFORM_SCALE),
+            s1_fc1 = fc_layer(inputs,256,activation=tf.nn.relu,kernel_initializer=tf.variance_scaling_initializer(),
                               use_batch_norm=True,training=s1_training,data_format=self.data_format)
             rd['s1_ret'] = tf.identity(tf.reshape(fc_layer(s1_fc1,self.num_lmark * 2),[-1,self.num_lmark,2]) + shape_mean_tensor,name='output_landmark')
         
@@ -158,10 +159,14 @@ class Model(object):
             inputs = self.__affine_image(inputs_imgs,r,t)
             s2_lmark = self.__affine_shape(rd['s1_ret'],r,t)
             s2_heatmap = self.__gen_heatmap(s2_lmark)
-            s2_feature = fc_layer(s1_fc1,(self.img_size // 2) ** 2,activation=tf.nn.relu,kernel_initializer=tf.variance_scaling_initializer(scale=GLOROTUNIFORM_SCALE))
+            s2_feature = fc_layer(s1_fc1,(self.img_size // 2) ** 2,activation=tf.nn.relu,kernel_initializer=tf.variance_scaling_initializer())
 
             s2_feature = tf.reshape(s2_feature,[-1,self.img_size // 2,self.img_size // 2,1])
             s2_feature_upscale = tf.image.resize_images(s2_feature,[self.img_size,self.img_size])
+
+            tf.summary.image('heatmap', s2_heatmap, max_outputs=6)
+            tf.summary.image('feature', s2_feature, max_outputs=6)
+            tf.summary.image('image', inputs, max_outputs=6)
 
             if self.data_format == 'channels_first':
                 inputs = tf.transpose(inputs, [0, 3, 1, 2])
@@ -179,7 +184,7 @@ class Model(object):
             inputs = tf.contrib.layers.flatten(inputs)
             inputs = tf.layers.dropout(inputs,0.5,training=s2_training)
 
-            s2_fc1 = fc_layer(inputs,256,activation=tf.nn.relu,kernel_initializer=tf.variance_scaling_initializer(scale=GLOROTUNIFORM_SCALE),
+            s2_fc1 = fc_layer(inputs,256,activation=tf.nn.relu,kernel_initializer=tf.variance_scaling_initializer(),
                               use_batch_norm=True,training=s2_training,data_format=self.data_format)
             s2_fc2 = tf.reshape(fc_layer(s2_fc1,self.num_lmark * 2),[-1,self.num_lmark,2]) + s2_lmark
             rd['s2_ret'] = tf.identity(self.__affine_shape(s2_fc2,r,t,isinv=True),name='output_landmark')

@@ -95,8 +95,6 @@ def dan_model_fn(features,
     if isinstance(features, dict):
         features = features['image']
 
-    tf.summary.image('images', features, max_outputs=6)
-
     model = model_class(num_lmark,data_format)
     resultdict = model(features,
                        stage==1 and mode==tf.estimator.ModeKeys.TRAIN,
