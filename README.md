@@ -46,7 +46,7 @@ python DAN_V2.py -ds 2 --data_dir=preprocess_output_dir -nlm 68 -mode eval
 Results on 300W
 ---
 * Speed : 4ms per Image on GTX 1080 Ti
-* Err : `1.35 %` on 300W common subset(bounding box diagonal normalization) same as paper result.
+* Err : `1.34 %` on 300W common subset(bounding box diagonal normalization).
 
 Pre-trained Model
 ---
