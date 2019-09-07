@@ -8,8 +8,8 @@ import numpy as np
 import cv2
 import tensorflow as tf
 
-from dan.300w_predefine import get_300w_mean_shape
-from utils.transform import umeyama
+from dan.predefine import get_300w_mean_shape
+from utils.transform.umeyama import umeyama
 
 _output_size = 256
 _crop_mean = ((get_300w_mean_shape() - 0.5) * 0.6 + 0.5) * _output_size
@@ -24,8 +24,8 @@ def parse_args():
 
 
 def sample_to_example(img_path):
-    img_path = str(pathlib.Path(img_path.decode()))
-    pts_path = str(img_path.with_suffix('.pts'))
+    img_path = img_path.decode()
+    pts_path = str(pathlib.Path(img_path).with_suffix('.pts'))
 
     img = cv2.imread(img_path)
     assert img is not None, "Can not read {}".format(img_path)
@@ -47,28 +47,36 @@ def sample_to_example(img_path):
     return example.SerializeToString()
 
 
-def chunk_to_record(img_path_list, output_dir):
+def to_record(img_path_list, output_path):
     def map_func(input):
-        example = tf.py_function(
+        example = tf.py_func(
             func=sample_to_example,
             inp=[input],
             Tout=tf.string)
         return example
 
     dataset = tf.data.Dataset.from_tensor_slices(img_path_list)
+    print(dataset)
     dataset = dataset.map(
         map_func, num_parallel_calls=tf.data.experimental.AUTOTUNE).prefetch(1)
-    writer_op = tf.data.experimental.TFRecordWriter(output_dir).write(dataset)
+    writer_op = tf.data.experimental.TFRecordWriter(output_path).write(dataset)
 
     with tf.Session() as sess:
         sess.run(writer_op)
     return
 
 
-def main(argv):
-    
+def main():
+    flags = parse_args()
+    output_dir = pathlib.Path(flags.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for idx, d in enumerate(flags.input_dir):
+        d = pathlib.Path(d)
+        img_list = list(d.rglob('*.png')) + list(d.rglob('*.jpg'))
+        img_list = list(map(str, img_list))
+        to_record(img_list, str(output_dir / '{}.tfrecord'.format(idx)))
 
 
 if __name__ == "__main__":
-    tf.logging.set_verbosity(tf.logging.INFO)
-    tf.app.run(argv=sys.argv)
+    main()
