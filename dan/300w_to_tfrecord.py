@@ -8,6 +8,12 @@ import numpy as np
 import cv2
 import tensorflow as tf
 
+from dan.300w_predefine import get_300w_mean_shape
+from utils.transform import umeyama
+
+_output_size = 256
+_crop_mean = ((get_300w_mean_shape() - 0.5) * 0.6 + 0.5) * _output_size
+
 
 def parse_args():
     parse = argparse.ArgumentParser()
@@ -17,149 +23,50 @@ def parse_args():
     return flags
 
 
-def getAffine(From, To):
-    FromMean = np.mean(From, axis=0)
-    ToMean = np.mean(To, axis=0)
+def sample_to_example(img_path):
+    img_path = str(pathlib.Path(img_path.decode()))
+    pts_path = str(img_path.with_suffix('.pts'))
 
-    FromCentralized = From - FromMean
-    ToCentralized = To - ToMean
+    img = cv2.imread(img_path)
+    assert img is not None, "Can not read {}".format(img_path)
 
-    FromVector = (FromCentralized).flatten()
-    ToVector = (ToCentralized).flatten()
+    lmk = np.genfromtxt(pts_path, skip_header=3, skip_footer=1)
+    lmk = lmk.reshape(-1, 2).astype(np.float32)
 
-    DotResult = np.dot(FromVector, ToVector)
-    NormPow2 = np.linalg.norm(FromCentralized) ** 2
+    transform = umeyama(lmk, _crop_mean)
+    image = cv2.warpAffine(img, transform[:2, :], (_output_size, _output_size),
+                           flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REFLECT)
+    lmk = lmk @ transform[:2, :2].T + transform[:2, 2]
 
-    a = DotResult / NormPow2
-    b = np.sum(np.cross(FromCentralized, ToCentralized)) / NormPow2
-
-    R = np.array([[a, b], [-b, a]])
-    T = ToMean - np.dot(FromMean, R)
-
-    return R, T
-
-
-def _load_data(imagepath, ptspath, is_train, mirror_array):
-    def makerotate(angle):
-        rad = angle * np.pi / 180.0
-        return np.array([[np.cos(rad), np.sin(rad)], [-np.sin(rad), np.cos(rad)]], dtype=np.float32)
-
-    srcpts = np.genfromtxt(ptspath.decode(), skip_header=3, skip_footer=1)
-    x, y = np.min(srcpts, axis=0).astype(np.int32)
-    w, h = np.ptp(srcpts, axis=0).astype(np.int32)
-    pts = (srcpts - [x, y]) / [w, h]
-
-    img = cv2.imread(imagepath.decode(), cv2.IMREAD_GRAYSCALE)
-    center = [0.5, 0.5]
-
-    if is_train:
-        pts = pts - center
-        pts = np.dot(pts, makerotate(np.random.normal(0, 20)))
-        pts = pts * np.random.normal(0.8, 0.05)
-        pts = pts + [np.random.normal(0, 0.05),
-                     np.random.normal(0, 0.05)] + center
-
-        pts = pts * FLAGS.img_size
-
-        R, T = getAffine(srcpts, pts)
-        M = np.zeros((2, 3), dtype=np.float32)
-        M[0:2, 0:2] = R.T
-        M[:, 2] = T
-        img = cv2.warpAffine(img, M, (FLAGS.img_size, FLAGS.img_size))
-
-        if any(mirror_array) and random.choice((True, False)):
-            pts[:, 0] = FLAGS.img_size - 1 - pts[:, 0]
-            pts = pts[mirror_array]
-            img = cv2.flip(img, 1)
-
-    else:
-        pts = pts - center
-        pts = pts * 0.8
-        pts = pts + center
-
-        pts = pts * FLAGS.img_size
-
-        R, T = getAffine(srcpts, pts)
-        M = np.zeros((2, 3), dtype=np.float32)
-        M[0:2, 0:2] = R.T
-        M[:, 2] = T
-        img = cv2.warpAffine(img, M, (FLAGS.img_size, FLAGS.img_size))
-
-    _, filename = os.path.split(imagepath.decode())
-    filename, _ = os.path.splitext(filename)
-
-    uid = str(uuid.uuid1())
-
-    cv2.imwrite(os.path.join(FLAGS.output_dir,
-                             filename + '@' + uid + '.png'), img)
-    np.savetxt(os.path.join(FLAGS.output_dir, filename +
-                            '@' + uid + '.ptv'), pts, delimiter=',')
-
-    return img, pts.astype(np.float32)
+    feature = {
+        'image_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[image.tobytes()])),
+        'lmk_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[lmk.tobytes()]))
+    }
+    example = tf.train.Example(
+        features=tf.train.Features(feature=feature))
+    return example.SerializeToString()
 
 
-def _input_fn(img, pts, is_train, mirror_array):
-    dataset_image = tf.data.Dataset.from_tensor_slices(img)
-    dataset_pts = tf.data.Dataset.from_tensor_slices(pts)
-    dataset = tf.data.Dataset.zip((dataset_image, dataset_pts))
+def chunk_to_record(img_path_list, output_dir):
+    def map_func(input):
+        example = tf.py_function(
+            func=sample_to_example,
+            inp=[input],
+            Tout=tf.string)
+        return example
 
-    dataset = dataset.prefetch(BATCH_SIZE)
-    dataset = dataset.repeat(FLAGS.repeat)
-    dataset = dataset.map(lambda imagepath, ptspath: tuple(tf.py_func(_load_data, [
-                          imagepath, ptspath, is_train, mirror_array], [tf.uint8, tf.float32])), num_parallel_calls=8)
-    dataset = dataset.prefetch(1)
+    dataset = tf.data.Dataset.from_tensor_slices(img_path_list)
+    dataset = dataset.map(
+        map_func, num_parallel_calls=tf.data.experimental.AUTOTUNE).prefetch(1)
+    writer_op = tf.data.experimental.TFRecordWriter(output_dir).write(dataset)
 
-    return dataset
-
-
-def _get_filenames(data_dir, listext):
-    imagelist = []
-    for ext in listext:
-        p = os.path.join(data_dir, ext)
-        imagelist.extend(glob.glob(p))
-
-    ptslist = []
-    for image in imagelist:
-        ptslist.append(os.path.splitext(image)[0] + ".pts")
-
-    return imagelist, ptslist
+    with tf.Session() as sess:
+        sess.run(writer_op)
+    return
 
 
 def main(argv):
-    imagenames, ptsnames = _get_filenames(FLAGS.input_dir, ["*.jpg", "*.png"])
-    mirror_array = np.genfromtxt(
-        FLAGS.mirror_file, dtype=int, delimiter=',') if FLAGS.mirror_file else np.zeros(1)
-
-    dataset = _input_fn(imagenames, ptsnames, FLAGS.istrain, mirror_array)
-    next_element = dataset.make_one_shot_iterator().get_next()
-
-    img_list = []
-    pts_list = []
-
-    with tf.Session() as sess:
-        count = 0
-        while True:
-            try:
-                img, pts = sess.run(next_element)
-                img_list.append(img)
-                pts_list.append(pts)
-            except tf.errors.OutOfRangeError:
-                img_list = np.stack(img_list)
-                pts_list = np.stack(pts_list)
-
-                mean_shape = np.mean(pts_list, axis=0)
-                imgs_mean = np.mean(img_list, axis=0)
-                imgs_std = np.std(img_list, axis=0)
-
-                np.savetxt(os.path.join(FLAGS.output_dir,
-                                        'mean_shape.ptv'), mean_shape, delimiter=',')
-                np.savetxt(os.path.join(FLAGS.output_dir,
-                                        'imgs_mean.ptv'), imgs_mean, delimiter=',')
-                np.savetxt(os.path.join(FLAGS.output_dir,
-                                        'imgs_std.ptv'), imgs_std, delimiter=',')
-
-                print("end")
-                break
+    
 
 
 if __name__ == "__main__":
