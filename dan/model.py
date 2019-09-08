@@ -171,7 +171,8 @@ def _other_stage_model_fn(inputs, last_stage_lmk, last_stage_feature, stage_idx,
                 last_stage_feature, [-1, 56, 56, 1])
             last_stage_feature = tf.image.resize_nearest_neighbor(
                 last_stage_feature, [112, 112], align_corners=True)
-            last_stage_feature = _transfrom_img(last_stage_feature, transform, inv=False)
+            last_stage_feature = _transfrom_img(
+                last_stage_feature, transform, inv=False)
 
         inputs = tf.concat([inputs, heatmap, last_stage_feature], axis=-1)
         with tf.variable_scope('head'):
@@ -207,11 +208,12 @@ def _other_stage_model_fn(inputs, last_stage_lmk, last_stage_feature, stage_idx,
         return x, feature
 
 
-def model_fn(inputs, training=True):
+def model_fn(inputs, train_stage_idx):
     inputs = tf.identity(inputs, name="image")
-    lmk, feature = _first_stage_model_fn(inputs, training=training)
+    lmk, feature = _first_stage_model_fn(
+        inputs, training=(train_stage_idx == 0))
     lmk, feature = _other_stage_model_fn(
-        inputs, lmk, feature, 1, training=training)
+        inputs, lmk, feature, 1, training=(train_stage_idx == 1))
     lmk = tf.identity(lmk, "lmk")
     return lmk
 

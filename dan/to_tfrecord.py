@@ -10,9 +10,12 @@ import tensorflow as tf
 
 from dan.predefine import get_300w_mean_shape
 from utils.transform.umeyama import umeyama
+from utils.transform.trans2d import fix_opencv_
 
-_output_size = 256
-_crop_mean = ((get_300w_mean_shape() - 0.5) * 0.6 + 0.5) * _output_size
+CACHE_SIZE = 256
+CACHE_PADDING = 0.4
+CACHE_MEANSHAPE = ((get_300w_mean_shape() - 0.5) *
+                   (1 - CACHE_PADDING) + 0.5) * CACHE_SIZE
 
 
 def parse_args():
@@ -30,16 +33,15 @@ def sample_to_example(img_path):
     img = cv2.imread(img_path)
     assert img is not None, "Can not read {}".format(img_path)
 
-    lmk = np.genfromtxt(pts_path, skip_header=3, skip_footer=1)
-    lmk = lmk.reshape(-1, 2).astype(np.float32)
+    lmk = np.genfromtxt(pts_path, skip_header=3,
+                        skip_footer=1, dtype=np.float32).reshape(-1, 2) - 2
 
-    transform = umeyama(lmk, _crop_mean)
-    image = cv2.warpAffine(img, transform[:2, :], (_output_size, _output_size),
-                           flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REFLECT)
+    transform = umeyama(lmk, CACHE_MEANSHAPE)
+    img = cv2.warpAffine(img, fix_opencv_(transform)[:2, :], (CACHE_SIZE, CACHE_SIZE),
+                         flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REFLECT)
     lmk = lmk @ transform[:2, :2].T + transform[:2, 2]
-
     feature = {
-        'image_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[image.tobytes()])),
+        'image_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[img.tobytes()])),
         'lmk_raw': tf.train.Feature(bytes_list=tf.train.BytesList(value=[lmk.tobytes()]))
     }
     example = tf.train.Example(

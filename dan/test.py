@@ -2,7 +2,7 @@ import unittest
 import tensorflow as tf
 import numpy as np
 
-from dan.dan_model import _umeyama_tf, _transfrom_lmk, _transfrom_img
+from dan.model import _umeyama_tf, _transfrom_lmk, _transfrom_img
 from utils.transform.umeyama import umeyama
 from utils.transform.trans2d import from_center_rotate
 
