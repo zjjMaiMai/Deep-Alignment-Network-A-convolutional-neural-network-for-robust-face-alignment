@@ -4,7 +4,7 @@ import numpy as np
 
 from dan.model import _umeyama_tf, _transfrom_lmk, _transfrom_img
 from utils.transform.umeyama import umeyama
-from utils.transform.trans2d import from_center_rotate
+from utils.transform.trans2d import from_center_rotate, fix_opencv_
 
 
 class TestDANFunc(unittest.TestCase):
@@ -54,7 +54,7 @@ class TestDANFunc(unittest.TestCase):
             if inv:
                 transfrom = np.linalg.inv(transfrom)
             ret = np.array([cv2.warpAffine(
-                i, t[:2, :], img_size, flags=cv2.INTER_NEAREST) for i, t in zip(img, transfrom)])
+                i,  fix_opencv_(t)[:2, :], img_size, flags=cv2.INTER_NEAREST) for i, t in zip(img, transfrom)])
             return ret
 
         img = np.zeros((32, 64, 64, 3), dtype=np.float32)

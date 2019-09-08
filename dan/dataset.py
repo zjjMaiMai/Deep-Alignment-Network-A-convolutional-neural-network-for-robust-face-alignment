@@ -29,9 +29,9 @@ def model_input_fn(path,
         if data_augment:
             rs = from_center_rotate(
                 (out_size / 2, out_size / 2),
-                np.random.uniform(-10, 10),
-                np.random.uniform(0.9, 1.1))
-            t = from_translate(np.random.uniform(-0.1, 0.1, 2) * out_size)
+                np.random.uniform(-30, 30),
+                np.random.uniform(0.7, 1.3))
+            t = from_translate(np.random.uniform(-0.3, 0.3, 2) * out_size)
             transform = t @ rs @ transform
 
         transform = transform.astype(np.float32)
@@ -79,8 +79,8 @@ if __name__ == "__main__":
     parse.add_argument("--path", type=str, required=True)
     flags = parse.parse_args()
 
-    OUT_SIZE = 512
-    dataset = model_input_fn(flags.path, out_size=OUT_SIZE).prefetch(1)
+    OUT_SIZE = 112
+    dataset = model_input_fn(flags.path, out_size=OUT_SIZE, data_augment=True).prefetch(1)
     next_element = dataset.make_one_shot_iterator().get_next()
 
     with tf.Session() as sess:

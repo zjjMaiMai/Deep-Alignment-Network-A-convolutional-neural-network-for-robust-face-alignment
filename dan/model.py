@@ -6,10 +6,15 @@ import numpy as np
 import tensorflow as tf
 
 from dan.predefine import get_300w_mean_shape
+from utils.transform.trans2d import from_translate
 
 L2_WEIGHT_DECAY = 1.0
 INPUT_SIZE = 112
-LMK_NUM = get_300w_mean_shape().shape[0]
+
+_STAGE_PADDING = 0.2
+_STAGE_MEANSHAPE = ((get_300w_mean_shape() - 0.5) *
+                    (1 - _STAGE_PADDING) + 0.5) * INPUT_SIZE
+LMK_NUM = _STAGE_MEANSHAPE.shape[0]
 
 
 def _conv(inputs, c, k, s, training, use_bn=True, use_relu=True):
@@ -107,6 +112,11 @@ def _transfrom_lmk(lmk, transform, inv=False):
 def _transfrom_img(img, transform, inv=False):
     if not inv:
         transform = tf.linalg.inv(transform)
+    # fix shift 0.5 pix
+    transform = tf.linalg.matmul(
+        transform, from_translate(-0.5).astype(np.float32))
+    transform = tf.linalg.matmul(
+        from_translate(0.5).astype(np.float32), transform)
     transform = tf.contrib.image.matrices_to_flat_transforms(transform)
     img = tf.contrib.image.transform(img, transform, interpolation='NEAREST')
     return img
@@ -160,7 +170,7 @@ def _other_stage_model_fn(inputs, last_stage_lmk, last_stage_feature, stage_idx,
     with tf.variable_scope("stage_{}".format(stage_idx)):
         with tf.variable_scope('affine'):
             transform = _umeyama_tf(
-                last_stage_lmk, get_300w_mean_shape()[np.newaxis, ::])
+                last_stage_lmk, _STAGE_MEANSHAPE[np.newaxis, ::])
             inputs = _transfrom_img(inputs, transform, inv=False)
             transform_lmk = _transfrom_lmk(
                 last_stage_lmk, transform, inv=False)
@@ -209,12 +219,10 @@ def _other_stage_model_fn(inputs, last_stage_lmk, last_stage_feature, stage_idx,
 
 
 def model_fn(inputs, train_stage_idx):
-    inputs = tf.identity(inputs, name="image")
     lmk, feature = _first_stage_model_fn(
         inputs, training=(train_stage_idx == 0))
     lmk, feature = _other_stage_model_fn(
         inputs, lmk, feature, 1, training=(train_stage_idx == 1))
-    lmk = tf.identity(lmk, "lmk")
     return lmk
 
 
