@@ -26,7 +26,6 @@ def parse_args():
     parser.add_argument('--trainset_dir', required=True, type=str)
     parser.add_argument('--evalset_dir', type=str)
     parser.add_argument('--train_stage', default=0, type=int)
-    parser.add_argument('--train_epochs', default=40, type=int)
     flags = parser.parse_args()
     return flags
 
@@ -91,7 +90,7 @@ def main():
             flags.trainset_dir,
             padding=PADDING,
             out_size=INPUT_SIZE,
-            data_augment=True).shuffle(2000).batch(BATCH_SIZE, drop_remainder=True).prefetch(1)
+            data_augment=True).shuffle(2000).repeat().batch(BATCH_SIZE, drop_remainder=True).prefetch(1)
         return dataset
 
     def eval_input_fn():
@@ -106,9 +105,9 @@ def main():
         params={
             'stage': flags.train_stage,
         })
-    for _ in range(flags.train_epochs):
+    for _ in range(NUM_STEPS // 500):
         print('Starting a training cycle.')
-        estimator.train(input_fn=train_input_fn)
+        estimator.train(input_fn=train_input_fn, max_steps=500)
 
         print('Starting to evaluate.')
         eval_results = estimator.evaluate(input_fn=eval_input_fn)
