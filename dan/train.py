@@ -31,11 +31,9 @@ def parse_args():
 
 
 def build_model(features, labels, mode, params):
-    if mode != tf.estimator.ModeKeys.TRAIN:
-        params['stage'] = -1
-
     image = tf.identity(features, name="image")
-    s0_lmk, s1_lmk = model_fn(image, train_stage_idx=params['stage'])
+    s0_lmk, s1_lmk = model_fn(
+        image, train_stage_idx=params['stage'] if mode == tf.estimator.ModeKeys.TRAIN else -1)
     s1_lmk = tf.identity(s1_lmk, name="landmark")
 
     if mode == tf.estimator.ModeKeys.PREDICT:
