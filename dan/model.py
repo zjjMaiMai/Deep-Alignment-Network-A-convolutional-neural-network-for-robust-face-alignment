@@ -219,15 +219,15 @@ def _other_stage_model_fn(inputs, last_stage_lmk, last_stage_feature, stage_idx,
 
 
 def model_fn(inputs, train_stage_idx):
-    lmk, feature = _first_stage_model_fn(
+    s0_lmk, feature = _first_stage_model_fn(
         inputs, training=(train_stage_idx == 0))
-    lmk, feature = _other_stage_model_fn(
-        inputs, lmk, feature, 1, training=(train_stage_idx == 1))
-    return lmk
+    s1_lmk, feature = _other_stage_model_fn(
+        inputs, s0_lmk, feature, 1, training=(train_stage_idx == 1))
+    return s0_lmk, s1_lmk
 
 
 if __name__ == '__main__':
-    output = model_fn(tf.placeholder(
+    _, output = model_fn(tf.placeholder(
         tf.float32, shape=[1, 112, 112, 3]), False)
     tf.profiler.profile(
         tf.get_default_graph(),

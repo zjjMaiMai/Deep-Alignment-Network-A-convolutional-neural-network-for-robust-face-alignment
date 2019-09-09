@@ -18,43 +18,67 @@ WEIGHT_DECAY = 5e-5
 BATCH_SIZE = 128
 NUM_STEPS = 100000
 
+
 def parse_args():
     parser = argparse.ArgumentParser(description="dan")
 
     parser.add_argument('--model_dir', required=True, type=str)
     parser.add_argument('--trainset_dir', required=True, type=str)
     parser.add_argument('--evalset_dir', type=str)
+    parser.add_argument('--train_stage', default=0, type=int)
+    parser.add_argument('--train_epoch', default=40, type=int)
     flags = parser.parse_args()
     return flags
 
 
-def build_model(image, label, flags):
-    image = tf.identity(image, name="image")
-    lmk = model_fn(image, train_stage_idx=0)
-    lmk = tf.identity(lmk, name="landmark")
+def build_model(features, labels, mode, params):
+    image = tf.identity(features, name="image")
+    s0_lmk, s1_lmk = model_fn(image, train_stage_idx=0)
+    s1_lmk = tf.identity(s1_lmk, name="landmark")
 
-    fa_loss = tf.reduce_mean(ibug_score(label, lmk))
+    if mode == tf.estimator.ModeKeys.PREDICT:
+        predictions = {
+            'lmk': s1_lmk,
+        }
+        return tf.estimator.EstimatorSpec(
+            mode=tf.estimator.ModeKeys.PREDICT,
+            predictions=predictions,
+            export_outputs={
+                'predict': tf.estimator.export.PredictOutput(predictions)
+            })
 
-    regularization_loss = tf.losses.get_regularization_loss()
-    total_loss = fa_loss + regularization_loss * WEIGHT_DECAY
+    stage_id = 'stage_0' if params['stage'] == 0 else 'stage_1'
+    lmk_out = s0_lmk if params['stage'] == 0 else s1_lmk
+    fa_loss = tf.reduce_mean(ibug_score(labels, lmk_out))
 
-    learning_rate = cosine_decay_with_warmup(
-        tf.train.get_or_create_global_step(),
-        LR,
-        NUM_STEPS,
-        LR * 0.1,
-        warmup_steps=NUM_STEPS // 10)
-    train_op = tf.train.MomentumOptimizer(
-        learning_rate=learning_rate, momentum=0.9).minimize(
-        total_loss, tf.train.get_or_create_global_step())
-    update_ops = tf.compat.v1.get_collection(tf.GraphKeys.UPDATE_OPS)
-    train_op = tf.group([train_op, update_ops])
+    if mode == tf.estimator.ModeKeys.TRAIN:
+        regularization_loss = tf.losses.get_regularization_loss(stage_id)
+        total_loss = fa_loss + regularization_loss * WEIGHT_DECAY
 
-    tf.summary.scalar('fa_loss', fa_loss)
-    tf.summary.scalar('regularization_loss', regularization_loss)
-    tf.summary.scalar('total_loss', total_loss)
-    tf.summary.scalar('learning_rate', learning_rate)
-    return train_op
+        learning_rate = cosine_decay_with_warmup(
+            tf.train.get_or_create_global_step(),
+            LR,
+            NUM_STEPS,
+            LR * 0.1,
+            warmup_steps=NUM_STEPS // 10)
+
+        train_op = tf.train.MomentumOptimizer(
+            learning_rate=learning_rate, momentum=0.9).minimize(
+            total_loss, tf.train.get_or_create_global_step(),
+            var_list=tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, stage_id))
+        update_ops = tf.compat.v1.get_collection(
+            tf.GraphKeys.UPDATE_OPS, stage_id)
+        train_op = tf.group([train_op, update_ops])
+
+        return tf.estimator.EstimatorSpec(
+            mode=tf.estimator.ModeKeys.TRAIN,
+            loss=fa_loss,
+            train_op=train_op)
+
+    if mode == tf.estimator.ModeKeys.EVAL:
+        return tf.estimator.EstimatorSpec(
+            mode=tf.estimator.ModeKeys.EVAL,
+            loss=fa_loss)
 
 
 def main():
@@ -62,31 +86,33 @@ def main():
     pathlib.Path(flags.model_dir).mkdir(parents=True, exist_ok=True)
     print(flags)
 
-    train_dataset = model_input_fn(
-        flags.trainset_dir,
-        padding=PADDING,
-        out_size=INPUT_SIZE,
-        data_augment=True).shuffle(2000).repeat(20).batch(BATCH_SIZE, drop_remainder=True).prefetch(1)
-    iterator = train_dataset.make_initializable_iterator()
-    next_img, next_label = iterator.get_next()
-    train_op = build_model(next_img, next_label, flags)
+    def train_input_fn():
+        dataset = model_input_fn(
+            flags.trainset_dir,
+            padding=PADDING,
+            out_size=INPUT_SIZE,
+            data_augment=True).shuffle(2000).batch(BATCH_SIZE, drop_remainder=True).prefetch(1)
+        return dataset
 
-    sess = tf.Session()
-    saver = tf.train.Saver()
-    merged = tf.summary.merge_all()
-    train_writer = tf.summary.FileWriter(
-        flags.model_dir + '/summary/train', sess.graph)
-    sess.run([tf.global_variables_initializer(), iterator.initializer])
-    while True:
-        step = sess.run(tf.train.get_or_create_global_step())
-        if step >= NUM_STEPS:
-            break
-        try:
-            summary, _ = sess.run([merged, train_op])
-            train_writer.add_summary(summary, step)
-        except tf.errors.OutOfRangeError:
-            sess.run(iterator.initializer)
-    saver.save(sess, flags.model_dir + '/train_saver/model', global_step=step)
+    def eval_input_fn():
+        dataset = model_input_fn(
+            flags.evalset_dir,
+            padding=PADDING,
+            out_size=INPUT_SIZE).batch(BATCH_SIZE).prefetch(1)
+        return dataset
+
+    estimator = tf.estimator.Estimator(
+        model_fn=build_model, model_dir=flags.model_dir,
+        params={
+            'stage': flags.train_stage,
+        })
+    for _ in range(flags.train_epochs):
+        print('Starting a training cycle.')
+        estimator.train(input_fn=train_input_fn)
+
+        print('Starting to evaluate.')
+        eval_results = estimator.evaluate(input_fn=eval_input_fn)
+        print(eval_results)
 
 
 if __name__ == "__main__":
