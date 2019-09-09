@@ -26,7 +26,7 @@ def parse_args():
     parser.add_argument('--trainset_dir', required=True, type=str)
     parser.add_argument('--evalset_dir', type=str)
     parser.add_argument('--train_stage', default=0, type=int)
-    parser.add_argument('--train_epoch', default=40, type=int)
+    parser.add_argument('--train_epochs', default=40, type=int)
     flags = parser.parse_args()
     return flags
 
