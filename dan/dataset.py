@@ -17,12 +17,8 @@ def model_input_fn(path,
                    padding=0.3,
                    out_size=256,
                    data_augment=False):
-    def _process(img_raw, lmk_raw):
-        img = np.frombuffer(img_raw, dtype=np.uint8).reshape(
-            CACHE_SIZE, CACHE_SIZE, 3)
-        lmk = np.frombuffer(lmk_raw, dtype=np.float32).reshape(
-            get_300w_mean_shape().shape)
 
+    def data_augment_numpy_func(img, lmk):
         transform = from_scale(out_size / CACHE_SIZE)
         transform = from_center_rotate(
             (out_size / 2, out_size / 2), 0, (1 - padding) / (1 - CACHE_PADDING)) @ transform
@@ -50,24 +46,30 @@ def model_input_fn(path,
         lmk = lmk / out_size
         return img, lmk
 
-    feature_description = {
-        'image_raw': tf.FixedLenFeature([], tf.string),
-        'lmk_raw': tf.FixedLenFeature([], tf.string),
-    }
+    def parse_proto(proto):
+        dict_feature = tf.parse_single_example(proto, {
+            'image_raw': tf.FixedLenFeature([], tf.string),
+            'lmk_raw': tf.FixedLenFeature([], tf.string),
+        })
+        img = tf.decode_raw(dict_feature['image_raw'], tf.uint8)
+        lmk = tf.decode_raw(dict_feature['lmk_raw'], tf.float32)
 
-    def _data_augment_tf_func(proto):
-        dict_feature = tf.parse_single_example(proto, feature_description)
-        img_tensor, lmk_tensor = tf.numpy_function(
-            _process,
-            inp=[dict_feature['image_raw'], dict_feature['lmk_raw']],
-            Tout=(tf.float32, tf.float32))
-        img_tensor.set_shape((out_size, out_size, 3))
-        lmk_tensor.set_shape(get_300w_mean_shape().shape)
-        return img_tensor, lmk_tensor
+        img = tf.reshape(img, [CACHE_SIZE, CACHE_SIZE, 3])
+        lmk = tf.reshape(lmk, get_300w_mean_shape().shape)
+        return img, lmk
+
+    def data_augment_tf_func(img, lmk):
+        img, lmk = tf.compat.v1.py_func(data_augment_numpy_func, [img, lmk], (tf.float32, tf.float32), stateful=False)
+        img = tf.reshape(img, [out_size, out_size, 3])
+        lmk = tf.reshape(lmk, list(get_300w_mean_shape().shape))
+        return img, lmk
 
     files = tf.data.Dataset.list_files(os.path.join(path, "*.tfrecord"))
-    dataset = files.interleave(
-        lambda x: tf.data.TFRecordDataset(x).map(_data_augment_tf_func), cycle_length=32, num_parallel_calls=8)
+    dataset = files.interleave(tf.data.TFRecordDataset)
+    dataset = dataset.map(parse_proto).cache()
+    if data_augment:
+        dataset = dataset.shuffle(buffer_size=1024)
+    dataset = dataset.map(data_augment_tf_func, num_parallel_calls=8)
     return dataset
 
 
@@ -80,7 +82,8 @@ if __name__ == "__main__":
     flags = parse.parse_args()
 
     OUT_SIZE = 112
-    dataset = model_input_fn(flags.path, out_size=OUT_SIZE, data_augment=True).prefetch(1)
+    dataset = model_input_fn(
+        flags.path, out_size=OUT_SIZE, data_augment=True).prefetch(1)
     next_element = dataset.make_one_shot_iterator().get_next()
 
     with tf.Session() as sess:

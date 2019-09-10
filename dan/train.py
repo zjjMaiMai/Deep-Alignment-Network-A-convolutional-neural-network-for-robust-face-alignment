@@ -91,7 +91,7 @@ def main():
             flags.trainset_dir,
             padding=PADDING,
             out_size=INPUT_SIZE,
-            data_augment=True).shuffle(2000).repeat().batch(BATCH_SIZE, drop_remainder=True).prefetch(1)
+            data_augment=True).repeat().batch(BATCH_SIZE, drop_remainder=True).prefetch(1)
         return dataset
 
     def eval_input_fn():
