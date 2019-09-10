@@ -108,7 +108,7 @@ def main():
         })
     for _ in range(NUM_STEPS // 500):
         print('Starting a training cycle.')
-        estimator.train(input_fn=train_input_fn, max_steps=500)
+        estimator.train(input_fn=train_input_fn, steps=500)
 
         print('Starting to evaluate.')
         eval_results = estimator.evaluate(input_fn=eval_input_fn)

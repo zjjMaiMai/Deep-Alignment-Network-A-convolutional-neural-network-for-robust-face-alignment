@@ -18,7 +18,7 @@ LMK_NUM = _STAGE_MEANSHAPE.shape[0]
 
 
 def _conv(inputs, c, k, s, training, use_bn=True, use_relu=True):
-    with tf.variable_scope('conv', reuse=False):
+    with tf.compat.v1.variable_scope('conv', reuse=False):
         x = tf.layers.conv2d(
             inputs=inputs,
             filters=c,
@@ -27,7 +27,7 @@ def _conv(inputs, c, k, s, training, use_bn=True, use_relu=True):
             padding='same',
             activation=None,
             use_bias=(not use_bn),
-            kernel_initializer=tf.initializers.he_uniform(),
+            kernel_initializer=tf.compat.v1.initializers.he_uniform(),
             kernel_regularizer=tf.contrib.layers.l2_regularizer(L2_WEIGHT_DECAY))
         if use_bn:
             x = tf.layers.batch_normalization(x, training=training)
@@ -39,13 +39,13 @@ def _conv(inputs, c, k, s, training, use_bn=True, use_relu=True):
 
 
 def _depthwise_conv(inputs, k, s, training, use_bn=True, use_relu=True):
-    with tf.variable_scope('dwconv'):
+    with tf.compat.v1.variable_scope('dwconv'):
         inputs_shape = inputs.get_shape()
         input_c = inputs_shape[-1].value
-        kernel = tf.get_variable(
+        kernel = tf.compat.v1.get_variable(
             name="dwconv_conv_kernel",
             shape=(k, k, input_c, 1),
-            initializer=tf.initializers.he_uniform(),
+            initializer=tf.compat.v1.initializers.he_uniform(),
             regularizer=tf.contrib.layers.l2_regularizer(L2_WEIGHT_DECAY),
             trainable=True)
 
@@ -66,9 +66,9 @@ def _depthwise_conv(inputs, k, s, training, use_bn=True, use_relu=True):
 def _one_block_s1(inputs, c_in, c_out, training, s=1, expand=2):
     x = inputs
     if c_in <= c_out:
-        with tf.variable_scope('proj'):
+        with tf.compat.v1.variable_scope('proj'):
             x = _conv(x, c=c_in * expand, k=1, s=1, training=training)
-    with tf.variable_scope('dw_pw'):
+    with tf.compat.v1.variable_scope('dw_pw'):
         x = _depthwise_conv(x, k=3, s=s, training=training)
         x = _conv(x, c=c_out, k=1, s=1, use_relu=False, training=training)
     if s == 1 and c_in == c_out:
@@ -91,10 +91,10 @@ def _umeyama_tf(src, dst):
         src_demean[:, :, 1], dst_demean[:, :, 0]), axis=1) / norm_pow_2
 
     sr = tf.reshape(tf.stack([a, -b, b, a], axis=1), [-1, 2, 2])
-    t = dst_mean - tf.matmul(src_mean, tf.matrix_transpose(sr))
+    t = dst_mean - tf.matmul(src_mean, tf.linalg.matrix_transpose(sr))
 
     sr = tf.pad(sr, [[0, 0], [0, 1], [0, 0]])
-    t = tf.matrix_transpose(
+    t = tf.linalg.matrix_transpose(
         tf.pad(t, [[0, 0], [0, 0], [0, 1]], constant_values=1))
 
     ret = tf.concat([sr, t], axis=-1)
@@ -105,7 +105,7 @@ def _transfrom_lmk(lmk, transform, inv=False):
     if inv:
         transform = tf.linalg.inv(transform)
     lmk = tf.matmul(lmk, transform[:, :2, :2],
-                    transpose_b=True) + tf.matrix_transpose(transform[:, :2, 2:])
+                    transpose_b=True) + tf.linalg.matrix_transpose(transform[:, :2, 2:])
     return lmk
 
 
@@ -134,11 +134,11 @@ def _gen_heatmap(shapes):
 
 
 def _first_stage_model_fn(inputs, training=True):
-    with tf.variable_scope("stage_0"):
-        with tf.variable_scope('head'):
+    with tf.compat.v1.variable_scope("stage_0"):
+        with tf.compat.v1.variable_scope('head'):
             x = _conv(inputs, c=24, k=3, s=2, training=training)
 
-        with tf.variable_scope('backbone'):
+        with tf.compat.v1.variable_scope('backbone'):
             last_channel = 24
             layers_config = [
                 # c, n, s, e
@@ -149,17 +149,17 @@ def _first_stage_model_fn(inputs, training=True):
             ]
             for idx, _value in enumerate(layers_config):
                 c, n, s, e = _value
-                with tf.variable_scope('layer_{}'.format(idx)):
+                with tf.compat.v1.variable_scope('layer_{}'.format(idx)):
                     for count in range(n):
-                        with tf.variable_scope('block_{}'.format(count)):
+                        with tf.compat.v1.variable_scope('block_{}'.format(count)):
                             x = _one_block_s1(x, last_channel, c, s=(
                                 s if count == 0 else 1), expand=e, training=training)
                             last_channel = c
 
-        with tf.variable_scope('gap'):
+        with tf.compat.v1.variable_scope('gap'):
             x = _conv(x, 256, 1, 1, training=training)
             feature = tf.layers.average_pooling2d(x, 7, 7)
-        with tf.variable_scope('fc'):
+        with tf.compat.v1.variable_scope('fc'):
             x = _conv(feature, c=LMK_NUM * 2, k=1, s=1, training=training,
                       use_bn=False, use_relu=False)
         x = tf.reshape(x, shape=[-1, LMK_NUM, 2], name="lmk")
@@ -167,8 +167,8 @@ def _first_stage_model_fn(inputs, training=True):
 
 
 def _other_stage_model_fn(inputs, last_stage_lmk, last_stage_feature, stage_idx, training=True):
-    with tf.variable_scope("stage_{}".format(stage_idx)):
-        with tf.variable_scope('affine'):
+    with tf.compat.v1.variable_scope("stage_{}".format(stage_idx)):
+        with tf.compat.v1.variable_scope('affine'):
             transform = _umeyama_tf(
                 last_stage_lmk, _STAGE_MEANSHAPE[np.newaxis, ::])
             inputs = _transfrom_img(inputs, transform, inv=False)
@@ -179,16 +179,16 @@ def _other_stage_model_fn(inputs, last_stage_lmk, last_stage_feature, stage_idx,
                 last_stage_feature, c=56 ** 2, k=1, s=1, training=training)
             last_stage_feature = tf.reshape(
                 last_stage_feature, [-1, 56, 56, 1])
-            last_stage_feature = tf.image.resize_nearest_neighbor(
+            last_stage_feature = tf.compat.v1.image.resize_nearest_neighbor(
                 last_stage_feature, [112, 112], align_corners=True)
             last_stage_feature = _transfrom_img(
                 last_stage_feature, transform, inv=False)
 
         inputs = tf.concat([inputs, heatmap, last_stage_feature], axis=-1)
-        with tf.variable_scope('head'):
+        with tf.compat.v1.variable_scope('head'):
             x = _conv(inputs, c=24, k=3, s=2, training=training)
 
-        with tf.variable_scope('backbone'):
+        with tf.compat.v1.variable_scope('backbone'):
             last_channel = 24
             layers_config = [
                 # c, n, s, e
@@ -199,17 +199,17 @@ def _other_stage_model_fn(inputs, last_stage_lmk, last_stage_feature, stage_idx,
             ]
             for idx, _value in enumerate(layers_config):
                 c, n, s, e = _value
-                with tf.variable_scope('layer_{}'.format(idx)):
+                with tf.compat.v1.variable_scope('layer_{}'.format(idx)):
                     for count in range(n):
-                        with tf.variable_scope('block_{}'.format(count)):
+                        with tf.compat.v1.variable_scope('block_{}'.format(count)):
                             x = _one_block_s1(x, last_channel, c, s=(
                                 s if count == 0 else 1), expand=e, training=training)
                             last_channel = c
 
-        with tf.variable_scope('gap'):
+        with tf.compat.v1.variable_scope('gap'):
             x = _conv(x, 256, 1, 1, training=training)
             feature = tf.layers.average_pooling2d(x, 7, 7)
-        with tf.variable_scope('fc'):
+        with tf.compat.v1.variable_scope('fc'):
             x = _conv(feature, c=LMK_NUM * 2, k=1, s=1, training=training,
                       use_bn=False, use_relu=False)
         x = tf.reshape(x, shape=[-1, LMK_NUM, 2])
@@ -227,10 +227,10 @@ def model_fn(inputs, train_stage_idx):
 
 
 if __name__ == '__main__':
-    _, output = model_fn(tf.placeholder(
-        tf.float32, shape=[1, 112, 112, 3]), False)
-    tf.profiler.profile(
+    _, output = model_fn(tf.compat.v1.placeholder(
+        tf.float32, shape=[1, 112, 112, 3]), -1)
+    tf.compat.v1.profiler.profile(
         tf.get_default_graph(),
         cmd='op',
-        options=tf.profiler.ProfileOptionBuilder.float_operation())
+        options=tf.compat.v1.profiler.ProfileOptionBuilder.float_operation())
     print("Output Tensor : {}".format(output))
