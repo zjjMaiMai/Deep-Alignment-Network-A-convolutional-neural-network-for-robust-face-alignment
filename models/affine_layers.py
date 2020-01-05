@@ -11,8 +11,6 @@ class AffineParamsLayer(nn.Module):
     def __init__(self):
         super().__init__()
         
-        last_row = torch.Tensor
-
     def forward(self, src, dst):
         src = src.view(src.size(0), -1, 2)
         src_mean = torch.mean(src, axis=1, keepdim=True)
@@ -34,3 +32,14 @@ class AffineParamsLayer(nn.Module):
         sr = F.pad(sr, pad=[0, 0, 0, 1], mode='constant', value=0)
         t = F.pad(t.permute(0, 2, 1), pad=[0, 0, 0, 1], mode='constant', value=1.0)
         return torch.cat((sr, t), dim=2)
+
+
+class AffineLandmarkLayer(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, lmk, params):
+        lmk = lmk.view(lmk.size(0), -1, 2)
+        lmk = F.pad(lmk, pad=[0, 1], mode='constant', value=1.0)
+        lmk = torch.bmm(params, lmk.permute(0, 2, 1)).permute(0, 2, 1)
+        return lmk[:, :, :2]
