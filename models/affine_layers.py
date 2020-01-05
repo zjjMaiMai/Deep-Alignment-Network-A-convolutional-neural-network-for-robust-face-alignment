@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -48,18 +49,19 @@ class AffineLandmarkLayer(nn.Module):
 
 
 class AffineImageLayer(nn.Module):
-    def __init__(self, w, h):
+    def __init__(self, input_w, input_h, output_w, output_h):
         from utils.misc.custom_module import WarpAffineToAffineGrid
         super().__init__()
-        self.w = w
-        self.h = h
-        self.cv_2_pytorch = WarpAffineToAffineGrid(w, h)
+        self.output_w = output_w
+        self.output_h = output_h
+        self.cv_2_pytorch = WarpAffineToAffineGrid(
+            input_w, input_h, output_w, output_h)
 
     def forward(self, img, params):
         params = self.cv_2_pytorch(params)
         grid = F.affine_grid(
-            params, [img.size(0), img.size(1), self.h, self.w])
-        return F.grid_sample(img, grid)
+            params[:, :2, :], [img.size(0), img.size(1), self.output_h, self.output_w], align_corners=False)
+        return F.grid_sample(img, grid, align_corners=False)
 
 
 class GenHeatmapLayer(nn.Module):
@@ -75,6 +77,50 @@ class GenHeatmapLayer(nn.Module):
         value = self.const_pixels - shape
         value = torch.norm(value, p=2, dim=-1)
         if self.reduce_dim:
-            value, _ = torch.min(value, dim=1)
+            value, _ = torch.min(value, dim=1, keepdim=True)
         value = torch.exp(-(value / self.sigma) ** 2)
         return value
+
+
+if __name__ == "__main__":
+    import cv2
+    from utils.misc.vis import draw_points
+    from models.model import get_mean_shape_300w
+
+    '''
+    src image
+    '''
+    src_img = cv2.imread('./image/test/221458225_1.jpg',
+                         cv2.IMREAD_COLOR).astype(np.float32) / 255
+    src_lmk = np.genfromtxt('./image/test/221458225_1.pts',
+                            skip_header=3, skip_footer=1) - 1.0
+    draw_img = draw_points(src_img, src_lmk)
+    cv2.imshow('draw_img', draw_img)
+
+    '''
+    test layer
+    '''
+    resize_size = 512
+    src_img_tensor = torch.from_numpy(
+        src_img).unsqueeze(0).float().permute(0, 3, 1, 2)
+    src_lmk_tensor = torch.from_numpy(src_lmk).unsqueeze(0).float()
+    mean_shape = torch.from_numpy(
+        get_mean_shape_300w()).unsqueeze(0) * resize_size
+
+    param = AffineParamsLayer()(src_lmk_tensor, mean_shape)
+    trans_lmk_tensor = AffineLandmarkLayer()(src_lmk_tensor, param)
+    trans_img_tensor = AffineImageLayer(
+        src_img.shape[1], src_img.shape[0], resize_size, resize_size)(src_img_tensor, param)
+    heatmap_tensor = GenHeatmapLayer(
+        resize_size, resize_size, 3.0)(trans_lmk_tensor)
+
+    trans_lmk = trans_lmk_tensor.detach().numpy()[0]
+    trans_img = trans_img_tensor.detach().numpy()[0].transpose(1, 2, 0)
+    heatmap = heatmap_tensor.detach().numpy()[0].transpose(1, 2, 0)
+
+    trans_img = draw_points(trans_img, trans_lmk, color=(1.0, 0.0, 0.0))
+    heatmap_lmk = draw_points(heatmap, trans_lmk, color=(0.0))
+
+    cv2.imshow('trans_img', trans_img)
+    cv2.imshow('heatmap_lmk', heatmap_lmk)
+    cv2.waitKey(-1)

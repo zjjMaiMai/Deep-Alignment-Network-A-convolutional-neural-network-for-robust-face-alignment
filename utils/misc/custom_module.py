@@ -101,13 +101,20 @@ def extract_glimpse(
 
 
 class WarpAffineToAffineGrid(nn.Module):
-    def __init__(self, w, h):
+    '''
+    left @ x^-1 @ right
+    '''
+
+    def __init__(self, input_w, input_h, output_w, output_h):
         super().__init__()
         left = torch.Tensor([
-            [2.0 / w, 0.0, -1.0],
-            [0.0, 2.0 / h, -1.0],
+            [2.0 / input_w, 0.0, -1.0],
+            [0.0, 2.0 / input_h, -1.0],
             [0.0, 0.0, 1.0]]).float()
-        right = torch.inverse(left)
+        right = torch.inverse(torch.Tensor([
+            [2.0 / output_w, 0.0, -1.0],
+            [0.0, 2.0 / output_h, -1.0],
+            [0.0, 0.0, 1.0]]).float())
         self.register_buffer('left', left)
         self.register_buffer('right', right)
 
