@@ -85,29 +85,32 @@ class GenHeatmapLayer(nn.Module):
 if __name__ == "__main__":
     import cv2
     from utils.misc.vis import draw_points
+    from utils.transform.umeyama import umeyama
+    from utils.transform.trans2d import fix_opencv_
     from models.model import get_mean_shape_300w
 
+    resize_size = 224
     '''
     src image
     '''
     src_img = cv2.imread('./image/test/221458225_1.jpg',
                          cv2.IMREAD_COLOR).astype(np.float32) / 255
     src_lmk = np.genfromtxt('./image/test/221458225_1.pts',
-                            skip_header=3, skip_footer=1) - 1.0
-    draw_img = draw_points(src_img, src_lmk)
-    cv2.imshow('draw_img', draw_img)
+                            skip_header=3, skip_footer=1).astype(np.float32) - 1.0
+    mean_shape = get_mean_shape_300w() * resize_size
+
+    src_draw = draw_points(src_img, src_lmk)
+    cv2.imshow('draw_img', src_draw)
 
     '''
     test layer
     '''
-    resize_size = 512
     src_img_tensor = torch.from_numpy(
         src_img).unsqueeze(0).float().permute(0, 3, 1, 2)
     src_lmk_tensor = torch.from_numpy(src_lmk).unsqueeze(0).float()
-    mean_shape = torch.from_numpy(
-        get_mean_shape_300w()).unsqueeze(0) * resize_size
+    mean_shape_tensor = torch.from_numpy(mean_shape).unsqueeze(0).float()
 
-    param = AffineParamsLayer()(src_lmk_tensor, mean_shape)
+    param = AffineParamsLayer()(src_lmk_tensor, mean_shape_tensor)
     trans_lmk_tensor = AffineLandmarkLayer()(src_lmk_tensor, param)
     trans_img_tensor = AffineImageLayer(
         src_img.shape[1], src_img.shape[0], resize_size, resize_size)(src_img_tensor, param)
@@ -118,9 +121,18 @@ if __name__ == "__main__":
     trans_img = trans_img_tensor.detach().numpy()[0].transpose(1, 2, 0)
     heatmap = heatmap_tensor.detach().numpy()[0].transpose(1, 2, 0)
 
-    trans_img = draw_points(trans_img, trans_lmk, color=(1.0, 0.0, 0.0))
-    heatmap_lmk = draw_points(heatmap, trans_lmk, color=(0.0))
+    trans_img_draw = draw_points(trans_img, trans_lmk, color=(1.0, 0.0, 0.0))
+    heatmap_draw = draw_points(heatmap, trans_lmk, color=(0.0))
 
-    cv2.imshow('trans_img', trans_img)
-    cv2.imshow('heatmap_lmk', heatmap_lmk)
+    cv2.imshow('trans_img', trans_img_draw)
+    cv2.imshow('heatmap_lmk', heatmap_draw)
+
+    '''
+    compare with opencv warpaffine
+    '''
+    trans_img_opencv = cv2.warpAffine(src_img, fix_opencv_(
+        umeyama(src_lmk, mean_shape))[:2, :], (resize_size, resize_size))
+    diff_with_opencv = np.abs(trans_img_opencv - trans_img)
+    cv2.imshow('diff_with_opencv', diff_with_opencv)
+
     cv2.waitKey(-1)
