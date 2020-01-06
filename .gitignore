@@ -242,3 +242,4 @@ ModelManifest.xml
 .fake/
 *.pyc
 .vscode/
+*.pth

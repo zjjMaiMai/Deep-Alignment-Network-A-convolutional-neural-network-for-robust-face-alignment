@@ -87,7 +87,8 @@ class FirstStageNet(nn.Module):
 class SecondStageNet(nn.Module):
     def __init__(self, mean_shape):
         super().__init__()
-        self.register_buffer('mean_shape', mean_shape * INPUT_SIZE)
+        self.register_buffer(
+            'mean_shape', torch.from_numpy(mean_shape).float().unsqueeze(0))
         self.affine_params_layer = AffineParamsLayer()
         self.affine_image_layer = AffineImageLayer(
             INPUT_SIZE, INPUT_SIZE, INPUT_SIZE, INPUT_SIZE)
@@ -144,12 +145,24 @@ class SecondStageNet(nn.Module):
 
 
 class DAN(nn.Module):
-    def __init__(self):
+    def __init__(self, mean_shape, stage):
         super().__init__()
         self.first_stage = FirstStageNet()
-        self.second_stage = SecondStageNet(
-            torch.from_numpy(get_mean_shape_300w()).unsqueeze(0))
+        self.second_stage = SecondStageNet(mean_shape)
+        self.stage = stage
         self.init_weight()
+
+    def train(self, mode=True):
+        self.training = mode
+        if self.stage == 0:
+            self.first_stage.train(mode)
+            self.second_stage.train(False)
+        elif self.stage == 1:
+            self.first_stage.train(False)
+            self.second_stage.train(mode)
+        else:
+            raise NotImplementedError
+        return self
 
     def init_weight(self):
         for m in self.modules():
@@ -160,91 +173,22 @@ class DAN(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, input, second_forward=True):
-        lmk_s1, fc_feature = self.first_stage(input)
-        if second_forward:
-            lmk_s2 = self.second_stage(input, lmk_s1, fc_feature)
+    def forward(self, input):
+        if self.stage == 0:
+            lmk, _ = self.first_stage(input)
+        elif self.stage == 1:
+            with torch.no_grad():
+                lmk_s1, fc_feature = self.first_stage(input)
+            lmk = self.second_stage(input, lmk_s1, fc_feature)
         else:
-            lmk_s2 = lmk_s1
-        return lmk_s1, lmk_s2
-
-
-def get_mean_shape_300w():
-    return np.array([
-        [0., 0.19162136],
-        [0.00342039, 0.32351251],
-        [0.0180597, 0.45481963],
-        [0.04585256, 0.5833164],
-        [0.09756264, 0.70239563],
-        [0.17664164, 0.80549044],
-        [0.27326557, 0.89158001],
-        [0.37968491, 0.96054857],
-        [0.5, 0.98090376],
-        [0.62031509, 0.96054857],
-        [0.72673443, 0.89158001],
-        [0.82335836, 0.80549044],
-        [0.90243736, 0.70239563],
-        [0.95414744, 0.5833164],
-        [0.9819403, 0.45481963],
-        [0.99657961, 0.32351251],
-        [1., 0.19162136],
-        [0.09431708, 0.09303366],
-        [0.156603, 0.03609577],
-        [0.24499027, 0.01909624],
-        [0.33640482, 0.03208252],
-        [0.4217254, 0.06810575],
-        [0.5782746, 0.06810575],
-        [0.66359518, 0.03208252],
-        [0.75500973, 0.01909624],
-        [0.843397, 0.03609577],
-        [0.90568292, 0.09303366],
-        [0.5, 0.17077372],
-        [0.5, 0.25582131],
-        [0.5, 0.34018057],
-        [0.5, 0.42711253],
-        [0.39750296, 0.48606286],
-        [0.44679426, 0.50396655],
-        [0.5, 0.51947823],
-        [0.55320574, 0.50396655],
-        [0.60249704, 0.48606286],
-        [0.19547876, 0.18200029],
-        [0.2495543, 0.15079845],
-        [0.31450698, 0.151619],
-        [0.37155765, 0.19479588],
-        [0.31041216, 0.20588273],
-        [0.2457658, 0.20499598],
-        [0.62844235, 0.19479588],
-        [0.68549302, 0.151619],
-        [0.7504457, 0.15079845],
-        [0.80452124, 0.18200029],
-        [0.7542342, 0.20499598],
-        [0.68958784, 0.20588273],
-        [0.30589462, 0.64454894],
-        [0.37753891, 0.6160173],
-        [0.44988263, 0.60094314],
-        [0.5, 0.61354581],
-        [0.55011737, 0.60094314],
-        [0.62246109, 0.6160173],
-        [0.69410538, 0.64454894],
-        [0.62477271, 0.71392546],
-        [0.55454877, 0.74405802],
-        [0.5, 0.74971382],
-        [0.44545123, 0.74405802],
-        [0.37522729, 0.71392546],
-        [0.33558146, 0.6482952],
-        [0.44915626, 0.64312397],
-        [0.5, 0.64850295],
-        [0.55084374, 0.64312397],
-        [0.66441854, 0.6482952],
-        [0.55181764, 0.67991149],
-        [0.5, 0.68607805],
-        [0.44818236, 0.67991149]], dtype=np.float32)
+            raise NotImplementedError
+        return lmk
 
 
 if __name__ == "__main__":
     from thop import profile
 
-    model = DAN()
+    model = DAN(np.random.rand(68, 2), 1)
     input = torch.randn(1, 3, 112, 112)
 
     total_ops, total_params = profile(model, (input,))
