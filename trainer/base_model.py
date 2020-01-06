@@ -116,4 +116,4 @@ class LandmarkWrapper(nn.Module):
 
     def val_dataloader(self):
         return DataLoader(self.eval_dataset, batch_size=self.hparams.batch_size,
-                          pin_memory=True, num_workers=4)
+                          pin_memory=True, num_workers=8)

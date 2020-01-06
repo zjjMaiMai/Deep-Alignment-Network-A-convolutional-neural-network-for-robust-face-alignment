@@ -8,6 +8,7 @@ import numpy as np
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
 
+from dataset.base_dataset import *
 from utils.transform.trans2d import *
 from utils.transform.umeyama import *
 
@@ -86,29 +87,74 @@ FLIP_300W = [16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 26, 25, 2
              32, 31, 45, 44, 43, 42, 47, 46, 39, 38, 37, 36, 41, 40, 54, 53, 52, 51, 50, 49, 48, 59, 58, 57, 56, 55, 64, 63, 62, 61, 60, 67, 66, 65]
 
 
+class Container300W(BaseContainer):
+    def __init__(self,
+                 path,
+                 cache_path,
+                 mmap_mode='r',
+                 name=None,
+                 cache_size=224,
+                 cache_padding=0.5):
+        super().__init__(path, cache_path, mmap_mode, name)
+        self.cache_size = cache_size
+        self.cache_padding = cache_padding
+
+    @property
+    def config(self):
+        return {
+            'path': str(self.path),
+            'cache_size': self.cache_size,
+            'cache_padding': self.cache_padding,
+        }
+
+    def make_cache(self):
+        mean_shape_padding = ((MEANSHAPE_300W - 0.5) *
+                              (1 - self.cache_padding) + 0.5) * self.cache_size
+
+        def func(image_path):
+            image = cv2.imread(image_path, cv2.IMREAD_COLOR |
+                               cv2.IMREAD_IGNORE_ORIENTATION)
+            lmk = np.genfromtxt(Path(image_path).with_suffix('.pts'),
+                                skip_header=3, skip_footer=1).astype(np.float32) - 1.0
+
+            transform = umeyama(lmk, mean_shape_padding).astype(np.float32)
+            image = cv2.warpAffine(image, fix_opencv_(transform)[
+                :2, :], (self.cache_size, self.cache_size), flags=cv2.INTER_AREA)
+            lmk = lmk @ transform[:2, :2].T + transform[:2, 2]
+            return (image, lmk, )
+
+        self.cache_path.mkdir(exist_ok=True, parents=True)
+        return multi_process(self.parsing_dataset(),
+                             func,
+                             self.cache_path / '{}.npy'.format(self.name),
+                             ['image', 'landmark'])
+
+    def parsing_dataset(self):
+        images_path = []
+        for p in self.path:
+            images_path += list(Path(p).rglob('*.jpg'))
+            images_path += list(Path(p).rglob('*.png'))
+        return list(map(str, images_path))
+
+
 class Dataset300W(Dataset):
-    def __init__(self, dir_list, output_size=112, padding=0.3, augment=False):
+    def __init__(self, face_container, output_size=112, padding=0.3, augment=False):
         super().__init__()
+        self.face_container = face_container
         self.output_size = output_size
         self.padding = padding
         self.augment = augment
         self.mean_shape = ((MEANSHAPE_300W - 0.5) *
                            (1 - padding) + 0.5) * output_size
-        self.images_path = []
-        for p in dir_list:
-            self.images_path += list(Path(p).rglob('*.jpg'))
-            self.images_path += list(Path(p).rglob('*.png'))
 
     def __len__(self):
-        return len(self.images_path)
+        return len(self.face_container)
 
     def __getitem__(self, index):
-        return self.read_sample(self.images_path[index])
+        return self.transform(self.face_container[index])
 
-    def read_sample(self, image_path):
-        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-        landmark = np.genfromtxt(str(image_path.with_suffix('.pts')),
-                                 skip_header=3, skip_footer=1).astype(np.float32) - 1.0
+    def transform(self, sample):
+        image, landmark = sample['image'], sample['landmark']
 
         trans = umeyama(landmark, self.mean_shape)
         if self.augment:
@@ -127,14 +173,3 @@ class Dataset300W(Dataset):
         image = cv2.warpAffine(image, fix_opencv_(
             trans)[:2, :], (self.output_size, self.output_size), flags=cv2.INTER_AREA)
         return {'image': image, 'landmark': landmark}
-
-
-if __name__ == "__main__":
-    from utils.misc.vis import draw_points
-
-    trainset = Dataset300W(['D:/Dataset/300-W'], augment=True)
-    for d in trainset:
-        image, landmark = d['image'], d['landmark']
-        draw_image = draw_points(image, landmark)
-        cv2.imshow('trainset', draw_image)
-        cv2.waitKey(1)

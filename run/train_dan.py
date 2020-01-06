@@ -10,7 +10,7 @@ from pathlib import Path
 from easydict import EasyDict
 
 from models.model import DAN
-from dataset.dataset_300w import Dataset300W
+from dataset.dataset_300w import Dataset300W, Container300W
 from trainer.base_trainer import BaseTrainer
 from trainer.base_model import LandmarkWrapper
 
@@ -18,8 +18,8 @@ from trainer.base_model import LandmarkWrapper
 def parse_args():
     parser = argparse.ArgumentParser(description="fa")
     parser.add_argument('--model_dir', required=True, type=Path)
-    parser.add_argument('--trainset', nargs='+', required=True, type=Path)
-    parser.add_argument('--evalset', nargs='+', required=True, type=Path)
+    parser.add_argument('--dataset_dir', required=True, type=Path)
+    parser.add_argument('--cache_dir', required=True, type=Path)
     flags = parser.parse_args()
     return flags
 
@@ -30,16 +30,35 @@ def main():
         learning_rate=0.5,
         weight_decay=5e-4,
         momentum=0.9,
-        num_steps=10000,
-        batch_size=64,
+        num_steps=50000,
+        batch_size=128,
     )
-    trainset = Dataset300W(flags.trainset, augment=True)
-    evalset = Dataset300W(flags.evalset, augment=False)
+    trainset = Dataset300W(
+        Container300W([
+            flags.dataset_dir / 'afw',
+            flags.dataset_dir / 'helen/trainset',
+            flags.dataset_dir / 'lfpw/trainset'],
+            flags.cache_dir / 'train_cache'
+        ), augment=True)
+    evalset = Dataset300W(
+        Container300W([
+            flags.dataset_dir / 'ibug',
+            flags.dataset_dir / 'helen/testset',
+            flags.dataset_dir / 'lfpw/testset'],
+            flags.cache_dir / 'eval_cache'
+        ), augment=False)
 
     model = DAN(trainset.mean_shape, 0)
+
+    model.stage = 0
     model_wrapper = LandmarkWrapper(model, config, trainset, evalset)
     BaseTrainer(model_dir=flags.model_dir / 'first_stage', num_step=config.num_steps,
-                log_every_n_step=1).fit(model_wrapper)
+                log_every_n_step=100).fit(model_wrapper)
+
+    model.stage = 1
+    model_wrapper = LandmarkWrapper(model, config, trainset, evalset)
+    BaseTrainer(model_dir=flags.model_dir / 'second_stage', num_step=config.num_steps,
+                log_every_n_step=100, fine_tune=True).fit(model_wrapper)
 
 
 if __name__ == "__main__":
