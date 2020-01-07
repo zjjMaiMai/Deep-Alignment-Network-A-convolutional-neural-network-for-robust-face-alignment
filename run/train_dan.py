@@ -27,11 +27,11 @@ def parse_args():
 def main():
     flags = parse_args()
     config = EasyDict(
-        learning_rate=0.5,
-        weight_decay=5e-4,
+        learning_rate=0.3,
+        weight_decay=5e-5,
         momentum=0.9,
         num_steps=100000,
-        batch_size=128,
+        batch_size=64,
         input_size=INPUT_SIZE
     )
     trainset = Dataset300W(
