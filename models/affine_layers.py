@@ -87,9 +87,9 @@ if __name__ == "__main__":
     from utils.misc.vis import draw_points
     from utils.transform.umeyama import umeyama
     from utils.transform.trans2d import fix_opencv_
-    from models.model import get_mean_shape_300w
+    from dataset.dataset_300w import MEANSHAPE_300W
 
-    resize_size = 224
+    resize_size = 112
     '''
     src image
     '''
@@ -97,7 +97,7 @@ if __name__ == "__main__":
                          cv2.IMREAD_COLOR).astype(np.float32) / 255
     src_lmk = np.genfromtxt('./image/test/221458225_1.pts',
                             skip_header=3, skip_footer=1).astype(np.float32) - 1.0
-    mean_shape = get_mean_shape_300w() * resize_size
+    mean_shape = MEANSHAPE_300W * resize_size
 
     src_draw = draw_points(src_img, src_lmk)
     cv2.imshow('draw_img', src_draw)
