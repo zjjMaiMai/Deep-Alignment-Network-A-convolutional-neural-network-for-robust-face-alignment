@@ -81,7 +81,7 @@ class FirstStageNet(nn.Module):
 
         fc_1 = self.fc_1(x)
         x = self.fc_2(fc_1)
-        return x, fc_1
+        return x.view(x.size(0), -1, 2), fc_1
 
 
 class SecondStageNet(nn.Module):
@@ -139,7 +139,7 @@ class SecondStageNet(nn.Module):
         x = self.fc_1(x)
         x = self.fc_2(x)
 
-        lmk = x * INPUT_SIZE + lmk
+        lmk = x.view(x.size(0), -1, 2) * INPUT_SIZE + lmk
         lmk = self.affine_landmark_layer(lmk, inv_affine_params) / INPUT_SIZE
         return lmk
 
