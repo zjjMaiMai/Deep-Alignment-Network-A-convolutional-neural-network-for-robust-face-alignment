@@ -89,7 +89,7 @@ if __name__ == "__main__":
     from utils.transform.trans2d import fix_opencv_
     from dataset.dataset_300w import MEANSHAPE_300W
 
-    resize_size = 112
+    resize_size = 224
     '''
     src image
     '''
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     trans_img_tensor = AffineImageLayer(
         src_img.shape[1], src_img.shape[0], resize_size, resize_size)(src_img_tensor, param)
     heatmap_tensor = GenHeatmapLayer(
-        resize_size, resize_size, 3.0)(trans_lmk_tensor)
+        resize_size, resize_size, resize_size / 32)(trans_lmk_tensor)
 
     trans_lmk = trans_lmk_tensor.detach().numpy()[0]
     trans_img = trans_img_tensor.detach().numpy()[0].transpose(1, 2, 0)
