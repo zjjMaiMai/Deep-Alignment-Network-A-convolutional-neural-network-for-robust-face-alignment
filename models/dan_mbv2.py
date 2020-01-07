@@ -7,36 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.affine_layers import *
-
-INPUT_SIZE = 224
-
-
-class Flatten(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, input):
-        return input.view(input.size(0), -1, 1, 1)
-
-
-class ReshapeFixedSize(nn.Module):
-    def __init__(self, w, h):
-        super().__init__()
-        self.w = w
-        self.h = h
-
-    def forward(self, input):
-        return input.view(input.size(0), -1, self.h, self.w)
-
-
-class Upsample(nn.Module):
-    def __init__(self, scale_factor=2):
-        super().__init__()
-        self.scale_factor = scale_factor
-
-    def forward(self, input):
-        return F.interpolate(input, scale_factor=self.scale_factor)
+from models.dan_layers import *
 
 
 class MobileBlock(nn.Module):
@@ -81,7 +52,7 @@ def make_block(c_in, c_out, n, s, e=1):
     return blocks
 
 
-class FirstStageNet(nn.Module):
+class FirstStageNetMBV2(nn.Module):
     def __init__(self):
         super().__init__()
         self.feature = nn.Sequential(
@@ -105,17 +76,18 @@ class FirstStageNet(nn.Module):
         return x.view(x.size(0), -1, 2)
 
 
-class SecondStageNet(nn.Module):
-    def __init__(self, mean_shape):
+class SecondStageNetMBV2(nn.Module):
+    def __init__(self, input_size, mean_shape):
         super().__init__()
+        self.input_size = input_size
         self.register_buffer(
             'mean_shape', torch.from_numpy(mean_shape).float().unsqueeze(0))
         self.affine_params_layer = AffineParamsLayer()
         self.affine_image_layer = AffineImageLayer(
-            INPUT_SIZE, INPUT_SIZE, INPUT_SIZE, INPUT_SIZE)
+            input_size, input_size, input_size, input_size)
         self.affine_landmark_layer = AffineLandmarkLayer()
         self.gen_heatmap_layer = GenHeatmapLayer(
-            INPUT_SIZE, INPUT_SIZE, INPUT_SIZE / 32)
+            input_size, input_size, input_size / 32)
 
         self.feature = nn.Sequential(
             nn.Conv2d(4, 32, 3, stride=2, padding=1, bias=False),
@@ -135,24 +107,25 @@ class SecondStageNet(nn.Module):
 
     def forward(self, input, lmk):
         affine_params = self.affine_params_layer(
-            lmk * INPUT_SIZE, self.mean_shape)
+            lmk * self.input_size, self.mean_shape)
         inv_affine_params = torch.inverse(affine_params)
-        lmk = self.affine_landmark_layer(lmk * INPUT_SIZE, affine_params)
+        lmk = self.affine_landmark_layer(lmk * self.input_size, affine_params)
         input = self.affine_image_layer(input, affine_params)
         heatmap = self.gen_heatmap_layer(lmk)
 
         x = torch.cat((input, heatmap), dim=1)
         x = self.feature(x)
-        lmk = x.view(x.size(0), -1, 2) * INPUT_SIZE + lmk
-        lmk = self.affine_landmark_layer(lmk, inv_affine_params) / INPUT_SIZE
+        lmk = x.view(x.size(0), -1, 2) * self.input_size + lmk
+        lmk = self.affine_landmark_layer(
+            lmk, inv_affine_params) / self.input_size
         return lmk
 
 
-class DAN(nn.Module):
-    def __init__(self, mean_shape, stage):
+class DAN_MBV2(nn.Module):
+    def __init__(self, input_size, mean_shape, stage):
         super().__init__()
-        self.first_stage = FirstStageNet()
-        self.second_stage = SecondStageNet(mean_shape)
+        self.first_stage = FirstStageNetMBV2()
+        self.second_stage = SecondStageNetMBV2(input_size, mean_shape)
         self.stage = stage
         self.init_weight()
 
@@ -192,8 +165,8 @@ class DAN(nn.Module):
 if __name__ == "__main__":
     from thop import profile
 
-    model = DAN(np.random.rand(68, 2), 1)
-    input = torch.randn(1, 3, INPUT_SIZE, INPUT_SIZE)
+    model = DAN_MBV2(224, np.random.rand(68, 2), 1)
+    input = torch.randn(1, 3, 224, 224)
 
     total_ops, total_params = profile(model, (input,))
     print("{:.4f} MACs(G)\t{:.4f} Params(M)".format(

@@ -82,6 +82,33 @@ class GenHeatmapLayer(nn.Module):
         return value
 
 
+class Flatten(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, input):
+        return input.view(input.size(0), -1, 1, 1)
+
+
+class ReshapeFixedSize(nn.Module):
+    def __init__(self, w, h):
+        super().__init__()
+        self.w = w
+        self.h = h
+
+    def forward(self, input):
+        return input.view(input.size(0), -1, self.h, self.w)
+
+
+class Upsample(nn.Module):
+    def __init__(self, scale_factor=2):
+        super().__init__()
+        self.scale_factor = scale_factor
+
+    def forward(self, input):
+        return F.interpolate(input, scale_factor=self.scale_factor)
+
+
 if __name__ == "__main__":
     import cv2
     from utils.misc.vis import draw_points

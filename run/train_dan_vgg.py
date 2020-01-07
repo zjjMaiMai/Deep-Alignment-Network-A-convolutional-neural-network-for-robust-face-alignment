@@ -9,7 +9,7 @@ import argparse
 from pathlib import Path
 from easydict import EasyDict
 
-from models.model import DAN, INPUT_SIZE
+from models.dan_vgg import DAN_VGG
 from dataset.dataset_300w import Dataset300W, Container300W
 from trainer.base_trainer import BaseTrainer
 from trainer.base_model import LandmarkWrapper
@@ -27,12 +27,12 @@ def parse_args():
 def main():
     flags = parse_args()
     config = EasyDict(
-        learning_rate=0.3,
-        weight_decay=5e-5,
+        learning_rate=0.5,
+        weight_decay=5e-4,
         momentum=0.9,
-        num_steps=100000,
+        num_steps=50000,
         batch_size=64,
-        input_size=INPUT_SIZE
+        input_size=112
     )
     trainset = Dataset300W(
         Container300W([
@@ -55,7 +55,7 @@ def main():
         output_size=config.input_size,
         augment=False)
 
-    model = DAN(trainset.mean_shape, 0)
+    model = DAN_VGG(config.input_size, trainset.mean_shape, 0)
 
     model.stage = 0
     model_wrapper = LandmarkWrapper(model, config, trainset, evalset)
