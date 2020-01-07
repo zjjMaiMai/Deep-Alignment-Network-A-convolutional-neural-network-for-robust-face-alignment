@@ -162,9 +162,9 @@ class Dataset300W(Dataset):
             if random.choice((True, False)):
                 trans = from_hflip(self.output_size) @ trans
                 landmark = landmark[FLIP_300W]
-            angle = np.random.normal(0, 20.0)
-            scale = np.random.normal(1.0, 0.25)
-            translate = np.random.normal(0.0, 0.2, 2) * self.output_size
+            angle = np.random.uniform(-20.0, 20.0)
+            scale = np.random.uniform(0.75, 1.25)
+            translate = np.random.uniform(-0.2, 0.2, 2) * self.output_size
 
             trans = from_translate(translate) @ from_center_rotate(
                 (self.output_size / 2, self.output_size / 2), angle, scale) @ trans
