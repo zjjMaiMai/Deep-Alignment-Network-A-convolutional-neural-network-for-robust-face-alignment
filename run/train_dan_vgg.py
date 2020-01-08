@@ -31,7 +31,7 @@ def main():
         weight_decay=5e-4,
         momentum=0.9,
         num_steps=50000,
-        batch_size=64,
+        batch_size=128,
         input_size=112
     )
     trainset = Dataset300W(
